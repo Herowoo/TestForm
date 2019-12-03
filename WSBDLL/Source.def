@@ -69,3 +69,5 @@ XDT_BaseInfo_Json @66
 GetComInputInfo @67
 test1 @68
 GetComInputInfo_Temp @69
+GetPersionalInfo @70
+GetPersionalInfo_temp @71

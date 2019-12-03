@@ -17,13 +17,33 @@
 #pragma comment(lib,"ws2_32.lib")
 #include <comdef.h>
 #include <string.h>
+#include <sstream>
+//AES加密头文件
+//#include "aes.h";
+//#include "aes_encryptor.h";
+//使用Cryptoo++库
+#include "CryptoPP\include\aes.h";
+#include "CryptoPP\include\rijndael.h";
+#include "CryptoPP\include\randpool.h";
+#include "CryptoPP\include\rsa.h";
+#include "CryptoPP\include\hex.h";
+#include "CryptoPP\include\filters.h";
+#include "CryptoPP\include\modes.h";
+#pragma comment(lib, "cryptlib.lib")
 using namespace std;
 //定义黑名单状态,初始值为0，验证后黑名单为-1，非黑名单为1
 int is_black = 0;
+int HDDTYPE = -1; //硬件类型，1：E711;	2:W2160;
+int RTYPE = -1;	//当前读卡类型，实体卡为1，电子健康卡为2
 const int T = 200;
 LPCSTR CONDLL = "HealthyCarder.dll";
+LPCSTR CAPDLL = "Cap_RW.dll";
 LPCSTR iniFileName = "./ChgCity.ini";
 LPSTR RIZHI = "debug.log";
+Json::Value js_vl;
+char ALLIDCARD[20] = { 0 };
+HMODULE HIns_CAP = LoadLibraryA(CAPDLL);
+HMODULE HIns_WQ = LoadLibraryA(CONDLL);
 
 //int seq = 1;
 /*
@@ -76,9 +96,10 @@ typedef int(WINAPI *poweron)(HANDLE, int, char*);
 //6.1.5	发送指令
 typedef int(WINAPI *sendapdu)(HANDLE, unsigned char, unsigned char*, unsigned long, unsigned char*, int*);
 //6.2.1	读发卡机构基本数据文件接口
-typedef int(WINAPI *r_ddf1ef05)(HANDLE, char*, char*, char*, char*, char*, char*, char*, char*, char*, char*);
+typedef int(WINAPI *readcardinfo)(char*, char*);
 //6.2.2	读持卡人基本信息数据文件接口
-typedef int(WINAPI *r_ddf1ef06)(HANDLE, char*, char*, char*, char*, char*);
+typedef int(WINAPI *readpersoninfo)(char*, char*);
+/*以下接口整合在个人基本信息里
 //读有效期等文件接口
 typedef int(WINAPI *r_ddf1ef08)(HANDLE, char*, char*, char*, char*, char*, char*);
 //写有效期等文件接口
@@ -95,6 +116,7 @@ typedef int(WINAPI *w_df01ef06)(HANDLE, char*, char*, char*, char*, char*, char*
 typedef int(WINAPI *r_df01ef07)(HANDLE, char*, char*, char*);
 //写职业婚姻信息文件接口
 typedef int(WINAPI *w_df01ef07)(HANDLE, char*, char*, char*);
+*/
 //读证件记录信息文件接口
 typedef int(WINAPI *r_df01ef08)(HANDLE, char*, char*, char*, char*);
 //写证件记录信息文件接口
@@ -128,13 +150,13 @@ typedef int(WINAPI *w_df03ef06)(HANDLE, int);
 //擦除门诊信息索引文件接口
 typedef int(WINAPI *e_df03ef06)(HANDLE, int);
 //读住院信息文件接口
-typedef int(WINAPI *r_df03ee)(HANDLE, int, char*, int, int, int);
+typedef int(WINAPI *readEEinfo)(int, char*, char*);
 //写住院信息文件接口
-typedef int(WINAPI *w_df03ee)(HANDLE, int, char*, int, int, int);
+typedef int(WINAPI *writeEEinfo)(char*, char*);
 //读过门诊信息文件接口
-typedef int(WINAPI *r_df03ed)(HANDLE, int, char*, int, int, int);
+typedef int(WINAPI *readEDinfo)(int, char*, char*);
 //写过门诊信息文件接口
-typedef int(WINAPI *w_df03ed)(HANDLE, int, char*, int, int, int);
+typedef int(WINAPI *writeEDinfo)(char*, char*);
 //6.3.1	SM3摘要
 typedef int(WINAPI *sm3)(HANDLE, BYTE*, int, BYTE*, BYTE*);
 //6.3.2	PIN验证函数
@@ -142,9 +164,9 @@ typedef int(WINAPI *verifypin)(HANDLE, const char*, BYTE*);
 //6.3.3	SM2签名函数
 typedef int(WINAPI *sm2)(HANDLE, BYTE*, BYTE, BYTE*, BYTE*);
 //获取设备序列号信息
-typedef int(WINAPI *getcsn)(HANDLE, char*);
+typedef int(WINAPI *readDevNum)(char*, char*);
 //获取SAM卡号信息
-typedef int(WINAPI *getsam)(HANDLE, char*);
+typedef int(WINAPI *readSamNum)(char*, char*);
 //写发卡机构基本数据文件接口
 typedef int(WINAPI *w_ddf1ef05)(HANDLE, char*, char*, char*, char*, char*, char*, char*, char*, char*, char*);
 //写持卡人基本信息数据文件接口
@@ -162,7 +184,35 @@ typedef int(WINAPI *lockinfo)(HANDLE);
 
 //市立医院定制接口，用来解决读卡器卡死问题
 typedef int(WINAPI *getinfo_his)(HANDLE, char*, long*, char*, char*, char*, char*);
-
+//握奇获取二维码接口
+typedef int(WINAPI *sendscancmd)(char*, char*);
+//握奇设置自动扫码接口
+typedef int(WINAPI *checkmodauto)(char*, char*);
+//握奇设置指令扫码模式
+typedef int(WINAPI *checkmodcmd)(char*, char*);
+//握奇获取当前扫码模式
+typedef int(WINAPI *getscanmod)(char*, char*);
+//@
+//6.2.1	读发卡机构基本数据文件接口
+typedef int(WINAPI *r_ddf1ef05)(HANDLE, char*, char*, char*, char*, char*, char*, char*, char*, char*, char*);
+//6.2.2	读持卡人基本信息数据文件接口
+typedef int(WINAPI *r_ddf1ef06)(HANDLE, char*, char*, char*, char*, char*);
+//读有效期等文件接口
+typedef int(WINAPI *r_ddf1ef08)(HANDLE, char*, char*, char*, char*, char*, char*);
+//读地址信息文件接口
+typedef int(WINAPI *r_df01ef05)(HANDLE, char*, char*, char*, char*);
+//读联系人信息文件接口
+typedef int(WINAPI *r_df01ef06)(HANDLE, char*, char*, char*, char*, char*, char*, char*, char*, char*);
+//读职业婚姻信息文件接口
+typedef int(WINAPI *r_df01ef07)(HANDLE, char*, char*, char*);
+//读住院信息文件接口
+typedef int(WINAPI *r_df03ee)(HANDLE, int, char*, int, int, int);
+//写住院信息文件接口
+typedef int(WINAPI *w_df03ee)(HANDLE, int, char*, int, int, int);
+//读过门诊信息文件接口
+typedef int(WINAPI *r_df03ed)(HANDLE, int, char*, int, int, int);
+//写过门诊信息文件接口
+typedef int(WINAPI *w_df03ed)(HANDLE, int, char*, int, int, int);
 /*========================================MD5加密实现=======================================================*/
 typedef  unsigned  char  *POINTER;
 typedef  unsigned  short  int  UINT2;
@@ -419,7 +469,111 @@ std::string base64_encode(char* bytes_to_encode, unsigned int in_len) {
 
 }
 /*========================================自定义方法=======================================================*/
+vector<string> v;
+char c_spliter = '|';
+void SplitStr(char* input, char* spliter, vector<char*>& output)
+{
+	char *p;
+	p = strtok(input, spliter);
+	while (p)
+	{
+		output.push_back(p);
+		p = strtok(NULL, spliter);
+	}
+}
+int my_split(const std::string& src, const char& delim,
+	std::vector<std::string>& vec)
+{
+	int src_len = src.length();
+	int find_cursor = 0;
+	int read_cursor = 0;
 
+	if (src_len <= 0) return -1;
+
+	vec.clear();
+	while (read_cursor < src_len) {
+
+		find_cursor = src.find(delim, find_cursor);
+
+		//1.找不到分隔符
+		if (-1 == find_cursor) {
+			if (read_cursor <= 0) return -1;
+
+			//最后一个子串, src结尾没有分隔符
+			if (read_cursor < src_len) {
+				vec.push_back(src.substr(read_cursor, src_len - read_cursor));
+				return 0;
+			}
+		}
+		//2.有连续分隔符的情况
+		else if (find_cursor == read_cursor) {
+			//字符串开头为分隔符, 也按空子串处理, 如不需要可加上判断&&(read_cursor!=0)
+			vec.push_back(std::string(""));
+		}
+		//3.找到分隔符
+		else
+			vec.push_back(src.substr(read_cursor, find_cursor - read_cursor));
+
+		read_cursor = ++find_cursor;
+		if (read_cursor == src_len) {
+			//字符串以分隔符结尾, 如不需要末尾空子串, 直接return
+			vec.push_back(std::string(""));
+			return 0;
+		}
+	}//end while()
+
+	return 0;
+}
+void TransScanMode() //握奇读卡器设置为指令扫码模式
+{
+	/*HMODULE hdll = LoadLibraryA(CONDLL);*/
+	if (HIns_WQ == NULL)
+	{
+		return;
+	}
+	else
+	{
+		getscanmod scanmod = (getscanmod)GetProcAddress(HIns_WQ, "GetScanMode");
+		char inputdata[1024] = { 0 };
+		char errmsg[1024] = { 0 };
+		int ret = scanmod(inputdata, errmsg);
+		if (ret == 0)
+		{
+			if (strcmp(inputdata, "00") == 0)
+			{
+				checkmodcmd ckcmd = (checkmodcmd)GetProcAddress(HIns_WQ, "Checkmod_Cmd");
+				ckcmd(inputdata, errmsg);
+				return;
+			}
+			else
+			{
+				return;
+			}
+		}
+		else
+		{
+			return;
+		}
+	}
+}
+string TransDate(char* jydt)
+{
+	std::string str_dt(jydt);
+	std::string str_trunce;
+	while (str_dt.find("-") != -1)
+	{
+		str_trunce = str_dt.replace(str_dt.find("-"), 1, "");
+	}
+	while (str_dt.find(":") != -1)
+	{
+		str_trunce = str_dt.replace(str_dt.find(":"), 1, "");
+	}
+	while (str_dt.find(" ") != -1)
+	{
+		str_trunce = str_dt.replace(str_dt.find(" "), 1, "");
+	}
+	return str_trunce;
+}
 ///根据域名获取IP
 BOOL GetIpByDomainName(char *szHost, char* szIp)
 {
@@ -518,6 +672,73 @@ void WriteInFile(char* filename, std::string str_to_write)
 	fout << str_to_write.c_str();
 	fout.close();
 }
+BYTE s_key[CryptoPP::AES::DEFAULT_KEYLENGTH], s_iv[CryptoPP::AES::BLOCKSIZE];
+//初始化key和IV
+void initKV()
+{
+	/*memset(s_key, 0x00, CryptoPP::AES::DEFAULT_KEYLENGTH);
+	memset(s_iv, 0x00, CryptoPP::AES::BLOCKSIZE);*/
+	char tempk[] = "xudutonghis20196";
+	char tempiv[] = "1234560405060708";
+
+	/*char tempk[] = "1234567890123456";
+	char tempiv[] = "0000000000000000";*/
+	for (int i = 0; i < CryptoPP::AES::DEFAULT_KEYLENGTH; i++)
+	{
+		s_key[i] = tempk[i];
+	}
+	for (int j = 0; j < CryptoPP::AES::BLOCKSIZE; j++)
+	{
+		s_iv[j] = tempiv[j];
+	}
+}
+//string encrypt(const string& plainText)
+//{
+//	string cipherText;
+//	CryptoPP::AES::Encryption aesEncryption(s_key, CryptoPP::AES::DEFAULT_KEYLENGTH);
+//	CryptoPP::CBC_Mode_ExternalCipher::Encryption cbcEncryption(aesEncryption, s_iv);
+//	CryptoPP::StreamTransformationFilter stfEncryptor(cbcEncryption, new CryptoPP::StringSink(cipherText));
+//	stfEncryptor.Put(reinterpret_cast<const unsigned char*>(plainText.c_str()), plainText.length());
+//	stfEncryptor.MessageEnd();
+//
+//	string cipherTextHex;
+//	for (int i = 0; i < cipherText.size(); i++)
+//	{
+//		char ch[3] = { 0 };
+//		sprintf(ch, "%02x", static_cast<BYTE>(cipherText[i]));
+//		cipherTextHex += ch;
+//	}
+//	return cipherTextHex;
+//}
+//string decrypt(string cipherTextHex)
+//{
+//	string cipherText;
+//	string decryptedText;
+//
+//	int i = 0;
+//	while (true)
+//	{
+//		char c;
+//		int x;
+//		stringstream ss;
+//		ss << hex << cipherTextHex.substr(i, 2).c_str();
+//		ss >> x;
+//		c = (char)x;
+//		cipherText += c;
+//		if (i >= cipherTextHex.length() - 2)break;
+//		i += 2;
+//	}
+//
+//	//  
+//	CryptoPP::AES::Decryption aesDecryption(s_key, CryptoPP::AES::DEFAULT_KEYLENGTH);
+//	CryptoPP::CBC_Mode_ExternalCipher::Decryption cbcDecryption(aesDecryption, s_iv);
+//	CryptoPP::StreamTransformationFilter stfDecryptor(cbcDecryption, new CryptoPP::StringSink(decryptedText));
+//	stfDecryptor.Put(reinterpret_cast<const unsigned char*>(cipherText.c_str()), cipherText.size());
+//
+//	stfDecryptor.MessageEnd();
+//
+//	return decryptedText;
+//}
 /*
 此方法用来获取卡片的黑名单状态
 入口参数：
@@ -758,7 +979,7 @@ short  GetPortINI()
 //通过UID验证黑名单
 long VerifiBlackCard_UID(long u_id)
 {
-	
+
 	const char* ipaddr = GetIPAddrINI();
 	short port = GetPortINI();
 	char recv_buf = '9';
@@ -833,7 +1054,17 @@ long VerifiBlackCard_UID(long u_id)
 	//	return 404;					//黑名单验证接口连接异常
 	//}
 }
-
+void TransCharacter(const char* input, char* output)
+{
+	int _wcsLen = ::MultiByteToWideChar(CP_UTF8, NULL, input, strlen(input), NULL, 0);
+	wchar_t* _wszString = new wchar_t[_wcsLen + 1];
+	//转换
+	::MultiByteToWideChar(CP_UTF8, NULL, input, strlen(input), _wszString, _wcsLen);
+	//最后加上'\0'
+	_wszString[_wcsLen] = '\0';
+	_bstr_t _b(_wszString);
+	strcpy(output, _b);
+}
 //通过配置文件获取字段的值
 LPSTR GetValueInIni(char* className, char* objName, LPCSTR fileName)
 {
@@ -1122,98 +1353,185 @@ void OpFile()
 	remove("temp_unload.txt");
 	//W_ReadCardLog("INFO 删除本目录临时文件");
 }
+void JudgeHDDType()
+{
+	W_ReadCardLog("JudgeHDDType============START");
+	/*HMODULE hdll1 = LoadLibraryA(CAPDLL);*/
+	opCom open_com;
+	open_com = (opCom)GetProcAddress(HIns_CAP, "OpenCom");
+
+	long ret1 = open_com();
+	char log[100];
+	if (ret1 == 0)
+	{
+		HDDTYPE = 1;
+		W_ReadCardLog("TYPE 1");
+		return;
+	}
+	else
+	{
+		/*HMODULE hdll2 = LoadLibraryA(CONDLL);*/
+
+		readcardinfo ef05 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadCardInfo");
+
+		if (ef05 == NULL)
+		{
+			//FreeLibrary(hdll2);
+			HDDTYPE = -1;
+			return;
+		}
+		else
+		{
+			HDDTYPE = 2;
+			W_ReadCardLog("TYPE 2");
+
+			return;
+			/*char outMsg[60535] = { 0 };
+			char errMsg[1024] = { 0 };
+			int stauts_ef05 = ef05(outMsg, errMsg);
+			if (stauts_ef05 == 0)
+			{
+				HDDTYPE = 2;
+				W_ReadCardLog("TYPE 2");
+				return;
+			}
+			else
+			{
+				W_ReadCardLog(errMsg);
+				HDDTYPE = -1;
+			}*/
+		}
+	}
+}
+//读取扫码枪串口号
+short WINAPI GetSERIALPORT()
+{
+	LPSTR LP_PATH = new char[MAX_PATH];
+	strcpy(LP_PATH, "./ChgCity.ini");
+	short port;
+	port = GetPrivateProfileIntA("SCNNER", "SERIALPORT", -1, LP_PATH);
+	delete[] LP_PATH;
+	return port;
+}
+//根据设备类型返回扫码码值
+long WINAPI GetComInputInfo(LPSTR info)
+{
+	W_ReadCardLog("GetComInputInfo=================START");
+	if (HDDTYPE == 1)
+	{
+		CSerial cs;
+		short sPort = 0;
+
+		short serial_port = GetSERIALPORT();
+		if ((serial_port == 0) || (serial_port == -1))
+		{
+			//自动识别串口号
+			for (int i = 1; i < 10; i++)
+			{
+				bool isOpen = cs.Open(i);
+				if (isOpen)
+				{
+					sPort = i;
+					cs.Close();
+				}
+			}
+		}
+		else
+		{
+			sPort = serial_port;
+		}
+		char log1[100] = { 0 };
+		sprintf(log1, "自动识别端口号为：%d", sPort);
+		W_ReadCardLog(log1);
+		bool bs = cs.Open(sPort);
+		char rev[1024] = { 0 };
+		DWORD T = 0;
+		DWORD TOTAL = 20000;
+		long ret = 0;
+		while (T < TOTAL)
+		{
+			char *p = strchr(rev, '\r');
+			if (p)
+			{
+				ret = 0;
+				break;
+			}
+			else
+			{
+				Sleep(500);
+				cs.ReadData(rev, 1024);
+				T += 500;
+				ret = -1;
+			}
+
+		}
+		cs.Close();
+		string str_input(rev);
+		int len_r = str_input.find_first_of("\r", 0);
+		string str_finnal = str_input.substr(0, len_r);
+		strcpy(info, str_finnal.c_str());
+		char log[100] = { 0 };
+		sprintf(log, "新大陆扫码返回：%d，码值：%s", ret, info);
+		W_ReadCardLog(log);
+		return ret;
+	}
+	else if (HDDTYPE == 2)
+	{
+		TransScanMode();//改变扫码模式
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			sendscancmd scan = (sendscancmd)GetProcAddress(HIns_WQ, "SendScanCmd");
+			char errmsg[1024] = { 0 };
+			int ret = scan(info, errmsg);
+			char log[100] = { 0 };
+			sprintf(log, "握奇扫码码值：%s", info);
+			W_ReadCardLog(log);
+			return ret;
+		}
+	}
+	else
+	{
+		return -1;
+	}
+
+}
 /*========================================实现城市通接口=======================================================*/
 //打开连接
 long _stdcall OpenCom()
 {
-	//W_ReadCardLog("EVENT 调用函数OpenCom");
-
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		//W_ReadCardLog("ERROR -1801 加载动态库失败");
-
-		return -1801;
-	}
-	else
-	{
-		opCom opencom = (opCom)GetProcAddress(hdllInst, "OpenCom");
-		if (opencom == NULL)
-		{
-			//W_ReadCardLog("ERROR -1701 加载函数OpenCom失败");
-
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			long status_opencom = opencom();
-			char _log[64] = { 0 };
-			sprintf(_log, "EVENT 调用函数OpenCom，返回%ld", status_opencom);
-			FreeLibrary(hdllInst);
-			return status_opencom;
-		}
-	}
+	return 0;
 }
 //关闭连接
 void _stdcall CloseCom()
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	closeCom c_com = (closeCom)GetProcAddress(hdllInst, "CloseCom");
-	//W_ReadCardLog("EVENT 调用函数CloseCom");
-	c_com();
-	FreeLibrary(hdllInst);
+	return;
 }
 //读取用户信息
 long _stdcall  CapGetNBCardInfo(CUSTOMERINFO *info)
 {
-	W_ReadCardLog("EVENT 调用函数CapGetNBCardInfo");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		W_ReadCardLog("ERROR -1801 加载动态库失败");
-		return -1801;
-	}
-	else
-	{
-		getcardinfo GetCardInfo;
-		GetCardInfo = (getcardinfo)GetProcAddress(hdllInst, "CapGetNBCardInfo");
-		if (GetCardInfo == NULL)
-		{
-			W_ReadCardLog("ERROR -1701 未能找到CapGetNBCardInfo接口");
-			return -1701;
-		}
-		else
-		{
-			//CUSTOMERINFO *ctm_info;
-			long status_getinfo = GetCardInfo(info);
-
-			//增加读卡-402后循环读卡功能，减少读卡失败几率 2018-11-14 11:41:51
-			const int MAX_TEST = 3;
-			int i = 0;
-			while ((-402 == status_getinfo) && (i < MAX_TEST))
-			{
-				W_ReadCardLog("ERROR 读卡状态-402，重新读卡");
-				CloseCom();
-				OpenCom();
-				status_getinfo = GetCardInfo(info);
-				char _testlog[64] = { 0 };
-				sprintf(_testlog, "INFO 第%d次尝试读卡,状态：%ld", i + 1, status_getinfo);
-				W_ReadCardLog(_testlog);
-				i++;
-			}
-			char _log[64] = { 0 };
-			sprintf(_log, "INFO 读卡结束，返回%ld", status_getinfo);
-			W_ReadCardLog(_log);
-			return status_getinfo;
-		}
-	}
+	W_ReadCardLog("CapGetNBCardInfo==================START");
+	//CUSTOMERINFO custinfo;
+	//初始化余额，通过HIS扣费前校验
+	info->Ye = 1000 * 100;
+	strcpy(info->CardASN, "17082538");
+	info->CardClass = 8;
+	const char *name_temp = js_vl["content"]["data"]["userName"].asString().c_str();
+	W_ReadCardLog(js_vl.toStyledString().c_str());
+	strcpy(info->Name, js_vl["content"]["data"]["userName"].asString().c_str());
+	js_vl.clear();
+	info->Status = 241;
+	return 0;
 }
 long _stdcall CapNBQueryCard_NoVerify(long *UID)
 {
 	//W_ReadCardLog("EVENT 调用函数CapNBQueryCard_NoVerify");
-	HMODULE  hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	/*HMODULE  hdllInst = LoadLibraryA(CONDLL);*/
+	if (HIns_CAP == NULL)
 	{
 		//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 
@@ -1222,7 +1540,7 @@ long _stdcall CapNBQueryCard_NoVerify(long *UID)
 	else
 	{
 		querycard qCard;
-		qCard = (querycard)GetProcAddress(hdllInst, "CapNBQueryCard");
+		qCard = (querycard)GetProcAddress(HIns_CAP, "CapNBQueryCard");
 		if (qCard == NULL)
 		{
 			//W_ReadCardLog("ERROR -1701 未能找到CapNBQueryCard接口");
@@ -1241,32 +1559,7 @@ long _stdcall CapNBQueryCard_NoVerify(long *UID)
 //寻卡
 long _stdcall CapNBQueryCard(long *UID)
 {
-	//W_ReadCardLog("EVENT 调用函数CapNBQueryCard");
-	HMODULE  hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
-
-		return -1801;
-	}
-	else
-	{
-		querycard qCard;
-		qCard = (querycard)GetProcAddress(hdllInst, "CapNBQueryCard");
-		if (qCard == NULL)
-		{
-			//W_ReadCardLog("ERROR -1701 未能找到CapNBQueryCard接口");
-			return -1701;
-		}
-		else
-		{
-			long status_qCard = qCard(UID);
-			char _log[64] = { 0 };
-			sprintf(_log, "EVENT 调用函数CapNBQueryCard结束，返回%ld", status_qCard);
-			//W_ReadCardLog(_log);
-			return status_qCard;
-		}
-	}
+	return 0;
 }
 
 //扣款，原接口
@@ -1283,8 +1576,8 @@ long _stdcall CapSetNBCardInfo_Unload(long objNo, long UID, long opFare, LPSTR j
 	}
 	else
 	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_CAP == NULL)
 		{
 			//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 
@@ -1292,11 +1585,11 @@ long _stdcall CapSetNBCardInfo_Unload(long objNo, long UID, long opFare, LPSTR j
 		}
 		else
 		{
-			setcardinfo Set_CardInfo = (setcardinfo)GetProcAddress(hdllInst, "CapSetNBCardInfo");
+			setcardinfo Set_CardInfo = (setcardinfo)GetProcAddress(HIns_CAP, "CapSetNBCardInfo");
 			if (Set_CardInfo == NULL)
 			{
 				//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo接口");
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return -1701;
 			}
 			else
@@ -1318,7 +1611,7 @@ long _stdcall CapSetNBCardInfo_Unload(long objNo, long UID, long opFare, LPSTR j
 				sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,psamID:%lld,psamJyNo:%ld,tac:%lld;status:%ld", _objNo, _UID, _opFare, _jyDT, pid, pjyno, tc, status_setinfo);
 				//W_log(_log);
 				//W_ReadCardLog(_log);
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return status_setinfo;
 			}
 		}
@@ -1334,17 +1627,17 @@ long _stdcall  CapSetNBCardInfo_temp(long objNo, long UID, long opFare, LPSTR jy
 	}
 	else
 	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_CAP == NULL)
 		{
 			return -1801;
 		}
 		else
 		{
-			setcardinfo_str Set_CardInfo = (setcardinfo_str)GetProcAddress(hdllInst, "CapSetNBCardInfo_str");
+			setcardinfo_str Set_CardInfo = (setcardinfo_str)GetProcAddress(HIns_CAP, "CapSetNBCardInfo_str");
 			if (Set_CardInfo == NULL)
 			{
-				FreeLibrary(hdllInst);
+				/*FreeLibrary(hdllInst);*/
 				return -1701;
 			}
 			else
@@ -1361,7 +1654,7 @@ long _stdcall  CapSetNBCardInfo_temp(long objNo, long UID, long opFare, LPSTR jy
 				long status_setinfo = Set_CardInfo(_objNo, _UID, _opFare, _jyDT, &_psamID, _psamJyNo, _tac, redix);
 				char ch_temp[254];
 				psamID = _i64toa(_psamID, ch_temp, 10);
-				FreeLibrary(hdllInst);
+				/*FreeLibrary(hdllInst);*/
 				return status_setinfo;
 			}
 		}
@@ -1378,24 +1671,24 @@ long _stdcall CapSetNBCardInfo_LMT(long objNo, long UID, long opFare, LPSTR jyDT
 	{
 
 
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_CAP == NULL)
 		{
 			return -1801;
 		}
 		else
 		{
-			setcardinfoLMT Set_CardInfoLMT = (setcardinfoLMT)GetProcAddress(hdllInst, "CapSetNBCardInfo_LMT");
+			setcardinfoLMT Set_CardInfoLMT = (setcardinfoLMT)GetProcAddress(HIns_CAP, "CapSetNBCardInfo_LMT");
 			if (Set_CardInfoLMT == NULL)
 			{
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return -1701;
 			}
 			else
 			{
 
 				long status_setinfoLMT = Set_CardInfoLMT(objNo, UID, opFare, jyDT, onceLmt, dayLmt, psamID, psamJyNo, tac);
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return status_setinfoLMT;
 			}
 		}
@@ -1450,19 +1743,19 @@ long WINAPI CapSetNBCardInfo_Str1_Unload(long objNo, long uid, long opFare, LPST
 	}
 	else
 	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_CAP == NULL)
 		{
 			//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 			return -1801;
 		}
 		else
 		{
-			setcardinfo_str1 set_cardstr = (setcardinfo_str1)GetProcAddress(hdllInst, "CapSetNBCardInfo_Str1");
+			setcardinfo_str1 set_cardstr = (setcardinfo_str1)GetProcAddress(HIns_CAP, "CapSetNBCardInfo_Str1");
 			if (set_cardstr == NULL)
 			{
 				//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo_Str1接口");
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return -1701;
 			}
 			else
@@ -1475,7 +1768,7 @@ long WINAPI CapSetNBCardInfo_Str1_Unload(long objNo, long uid, long opFare, LPST
 				sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,redix:%d,psamID:%s,psamJyNo:%ld,tac:%s;status:%d", objNo, uid, opFare, str_jydt, redix, str_psamid, *psamJyNo, str_tac, status_setcardstr);
 				//W_log(_log);	//原日志弃用，整合到./Log/ReadCard.log
 				//W_ReadCardLog(_log);
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return status_setcardstr;
 			}
 		}
@@ -1489,19 +1782,19 @@ long WINAPI CapSetNBCardInfo_SLYY(long objNo, long uid, long opFare, LPSTR jyDT,
 	sprintf(log, "PARA objNo:%d,UID:%d,opFare:%d,jyDT:%s", objNo, uid, opFare, jyDT);
 	//W_ReadCardLog(log);
 
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+	if (HIns_CAP == NULL)
 	{
 		//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 		return -1801;
 	}
 	else
 	{
-		setcardinfo_str1 set_cardstr = (setcardinfo_str1)GetProcAddress(hdllInst, "CapSetNBCardInfo_Str1");
+		setcardinfo_str1 set_cardstr = (setcardinfo_str1)GetProcAddress(HIns_CAP, "CapSetNBCardInfo_Str1");
 		if (set_cardstr == NULL)
 		{
 			//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo_Str1接口");
-			FreeLibrary(hdllInst);
+			//FreeLibrary(hdllInst);
 			return -1701;
 		}
 		else
@@ -1514,7 +1807,7 @@ long WINAPI CapSetNBCardInfo_SLYY(long objNo, long uid, long opFare, LPSTR jyDT,
 			sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,redix:%d,psamID:%s,psamJyNo:%ld,tac:%s;status:%d", objNo, uid, opFare, str_jydt, redix, str_psamid, psamJyNo, str_tac, status_setcardstr);
 			//W_log(_log);	原日志弃用，整合到./Log/ReadCard.log
 			//W_ReadCardLog(_log);
-			FreeLibrary(hdllInst);
+			//FreeLibrary(hdllInst);
 			return status_setcardstr;
 		}
 	}
@@ -1523,47 +1816,103 @@ long WINAPI CapSetNBCardInfo_SLYY(long objNo, long uid, long opFare, LPSTR jyDT,
 //5.15.	扣款（psam卡号、TAC返回字符串）
 long WINAPI CapSetNBCardInfo_Str1(long objNo, long uid, long opFare, LPSTR jyDT, char *psamID, long *psamJyNo, char *tac, int redix)
 {
-	//W_ReadCardLog("EVENT 调用函数CapSetNBCardInfo_Str1开始");
-	//对扣费JSON对象赋值
-	Json::Value Charging;
-	Json::FastWriter fw;
-	//调用读卡方法，获取账户余额
-	Sleep(T);
-	if (VerifiBlackCard_UID(uid) != 0)
+
+	JudgeHDDType();
+	char outmsg[2048] = { 0 };
+	int ret = GetComInputInfo(outmsg);
+	if (ret == 0)
 	{
-		return -777;
-	}
-	else
-	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		Json::Value sendvalue;
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = "pay";
+		//使用17位时间戳作为订单号
+		std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch());
+		sendvalue["content"]["orderNo"] = ms.count();
+		sendvalue["content"]["orderTime"] = TransDate(jyDT);
+		sendvalue["content"]["txnAmt"] = opFare;
+		sendvalue["content"]["termId"] = atoll(GetValueInIni("MIS", "TERMID", iniFileName));//终端号
+		sendvalue["content"]["reqType"] = "门诊消费";
+		sendvalue["content"]["couponInfo"] = 0;
+		sendvalue["content"]["qrNo"] = outmsg;
+		sendvalue["content"]["merId"] = GetValueInIni("MIS", "MERID", iniFileName);
+		sendvalue["content"]["merCatCode"] = GetValueInIni("MIS", "MERCATCODE", iniFileName);
+		sendvalue["content"]["merName"] = GetValueInIni("MIS", "MERNAME", iniFileName);
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[1024] = { 0 };
+		memcpy(_send_buff, sendJson.c_str(), 1024);
+		W_ReadCardLog(_send_buff);
+		//提交接口
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		char req_resv[1024] = { 0 };
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
 		{
-			//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
-			return -1801;
-		}
-		else
-		{
-			setcardinfo_str1 set_cardstr = (setcardinfo_str1)GetProcAddress(hdllInst, "CapSetNBCardInfo_Str1");
-			if (set_cardstr == NULL)
+			char _rev_temp[1024] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
 			{
-				//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo_Str1接口");
-				FreeLibrary(hdllInst);
-				return -1701;
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				W_ReadCardLog(json_rel.c_str());
+				//返回Json示例：
+				//{"code":"R00000","content":{"data":{"orderNo":"1558334758179","payResult":"成功","autoCode":"0","termId":"1"}},"desc":"支付成功","flag":1}
+				//解析json
+				Json::Value root;
+				//js_vl.clear();
+				Json::Reader reader;
+				try
+				{
+					if (reader.parse(json_rel, root))
+					{
+						if (root["flag"].asString() == "1")
+						{
+							W_ReadCardLog("INFO 支付成功");
+							//处理出参
+							strcpy(psamID, GetValueInIni("MIS", "TERMID", iniFileName));
+							char tac_temp[20] = { 0 };
+							_i64toa(ms.count(), tac_temp, 10);
+							strcpy(tac, tac_temp);
+							*psamJyNo = atol(root["content"]["data"]["autoCode"].asString().c_str());
+							return 0;
+						}
+						else
+						{
+							W_ReadCardLog("ERROR 支付失败");
+							return -11;
+						}
+					}
+				}
+				catch (const std::exception&ex)
+				{
+					return -13;
+				}
 			}
 			else
 			{
-				long status_setcardstr = set_cardstr(objNo, uid, opFare, jyDT, psamID, psamJyNo, tac, redix);
-				char* str_jydt = jyDT;
-				char* str_psamid = psamID;
-				char* str_tac = tac;
-				char _log[1024];
-				sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,redix:%d,psamID:%s,psamJyNo:%ld,tac:%s;status:%d", objNo, uid, opFare, str_jydt, redix, str_psamid, *psamJyNo, str_tac, status_setcardstr);
-				//W_ReadCardLog(_log);
-				FreeLibrary(hdllInst);
-				return status_setcardstr;
+				W_ReadCardLog("ERROR 返回信息格式有误");
+				return -12;
 			}
 		}
+		else
+		{
+			return ret_sendpost;
+		}
 	}
+	else
+	{
+		return -1;
+	}
+
 }
 //5.8.	更新日累计消费
 long _stdcall CapUpdateNBCardStatus(long opFare, LPSTR jyDT)
@@ -1716,19 +2065,19 @@ long _stdcall CapSetNBCardInfo_Str_Unload(long objNo, long uid, long opFare, LPS
 	sprintf(log, "PARA objNo:%d,UID:%d,opFare:%d,jyDT:%s", objNo, uid, opFare, jyDT);
 	//W_ReadCardLog(log);
 
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+	if (HIns_CAP == NULL)
 	{
 		//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 		return -1801;
 	}
 	else
 	{
-		setcardinfo_str set_cardstr = (setcardinfo_str)GetProcAddress(hdllInst, "CapSetNBCardInfo_Str");
+		setcardinfo_str set_cardstr = (setcardinfo_str)GetProcAddress(HIns_CAP, "CapSetNBCardInfo_Str");
 		if (set_cardstr == NULL)
 		{
 			////W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo_Str接口");
-			FreeLibrary(hdllInst);
+			//FreeLibrary(hdllInst);
 			return -1701;
 		}
 		else
@@ -1741,7 +2090,7 @@ long _stdcall CapSetNBCardInfo_Str_Unload(long objNo, long uid, long opFare, LPS
 			sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,redix:%d,psamID:%lld,psamJyNo:%ld,tac:%s;status:%d", objNo, uid, opFare, str_jydt, redix, psamID, psamJyNo, tac, status_setcardstr);
 			//W_log(_log);	//原日志弃用，整合到./Log/ReadCard.log
 			//W_ReadCardLog(_log);
-			FreeLibrary(hdllInst);
+			//FreeLibrary(hdllInst);
 			return status_setcardstr;
 		}
 	}
@@ -1750,98 +2099,117 @@ long _stdcall CapSetNBCardInfo_Str_Unload(long objNo, long uid, long opFare, LPS
 //扣款，增加上传功能
 long _stdcall CapSetNBCardInfo_Str(long objNo, long uid, long opFare, LPSTR jyDT, __int64 *psamID, long *psamJyNo, char *tac, int redix)
 {
-	//W_ReadCardLog("EVENT 调用函数CapSetNBCardInfo_Str开始");
-	//对扣费JSON对象赋值
-	Json::Value Charging;
-	Json::FastWriter fw;
-	if (VerifiBlackCard_UID(uid) != 0)
+
+	JudgeHDDType();
+	char outmsg[2048] = { 0 };
+	int ret = GetComInputInfo(outmsg);
+	if (ret == 0)
 	{
-		return -777;
-	}
-	else
-	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		Json::Value sendvalue;
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = "pay";
+		//使用17位时间戳作为订单号
+		std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch());
+		sendvalue["content"]["orderNo"] = ms.count();
+		sendvalue["content"]["orderTime"] = TransDate(jyDT);
+		sendvalue["content"]["txnAmt"] = opFare;
+		sendvalue["content"]["termId"] = atoll(GetValueInIni("MIS", "TERMID", iniFileName));//终端号
+		sendvalue["content"]["reqType"] = "门诊消费";
+		sendvalue["content"]["couponInfo"] = 0;
+		sendvalue["content"]["qrNo"] = outmsg;
+		sendvalue["content"]["merId"] = GetValueInIni("MIS", "MERID", iniFileName);
+		sendvalue["content"]["merCatCode"] = GetValueInIni("MIS", "MERCATCODE", iniFileName);
+		sendvalue["content"]["merName"] = GetValueInIni("MIS", "MERNAME", iniFileName);
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[1024] = { 0 };
+		memcpy(_send_buff, sendJson.c_str(), 1024);
+		W_ReadCardLog(_send_buff);
+		//提交接口
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		char req_resv[1024] = { 0 };
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
 		{
-			//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
-			return -1801;
-		}
-		else
-		{
-			setcardinfo_str set_cardstr = (setcardinfo_str)GetProcAddress(hdllInst, "CapSetNBCardInfo_Str");
-			if (set_cardstr == NULL)
+			char _rev_temp[1024] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
 			{
-				//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo_Str接口");
-				FreeLibrary(hdllInst);
-				return -1701;
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				W_ReadCardLog(json_rel.c_str());
+				//返回Json示例：
+				//{"code":"R00000","content":{"data":{"orderNo":"1558334758179","payResult":"成功","autoCode":"0","termId":"1"}},"desc":"支付成功","flag":1}
+				//解析json
+				Json::Value root;
+				//js_vl.clear();
+				Json::Reader reader;
+				try
+				{
+					if (reader.parse(json_rel, root))
+					{
+						if (root["flag"].asString() == "1")
+						{
+							W_ReadCardLog("INFO 支付成功");
+							//处理出参
+							*psamID = atoll(GetValueInIni("MIS", "TERMID", iniFileName));
+							char tac_temp[20] = { 0 };
+							_i64toa(ms.count(), tac_temp, 10);
+							strcpy(tac, tac_temp);
+							*psamJyNo = atol(root["content"]["data"]["autoCode"].asString().c_str());
+							return 0;
+						}
+						else
+						{
+							W_ReadCardLog("ERROR 支付失败");
+							return -11;
+						}
+					}
+				}
+				catch (const std::exception&ex)
+				{
+					return -13;
+				}
+
 			}
 			else
 			{
-				long status_setcardstr = set_cardstr(objNo, uid, opFare, jyDT, psamID, psamJyNo, tac, redix);
-				char* str_jydt = jyDT;
-
-				//char* str_tac = tac;
-				//char _log[512];
-				//sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,redix:%d,psamID:%lld,psamJyNo:%ld,tac:%s;status:%d", objNo, uid, opFare, str_jydt, redix, psamID, psamJyNo, tac, status_setcardstr);
-				//W_log(_log);	//原日志弃用，整合到./Log/ReadCard.log
-				//W_ReadCardLog(_log);
-				FreeLibrary(hdllInst);
-				return status_setcardstr;
+				W_ReadCardLog("ERROR 返回信息格式有误");
+				return -12;
 			}
 		}
+		else
+		{
+			return ret_sendpost;
+		}
 	}
+	else
+	{
+		return -1;
+	}
+
+
 }
 //5.13.	获取tac值
 long _stdcall CapGetConsumeTac(long no, LPSTR tac)
 {
 	/*std::thread t(OpFile);
 	t.detach();*/
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		gettac get_tac = (gettac)GetProcAddress(hdllInst, "CapGetConsumeTac");
-		if (get_tac == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			long status_gettac = get_tac(no, tac);
-			FreeLibrary(hdllInst);
-			return status_gettac;
-		}
-	}
+	return -1;
 }
 //获取十次交易记录
 long _stdcall CapReadRecords(CONSUMEINFO* info)
 {
-	HMODULE hinstance = LoadLibraryA(CONDLL);
-	if (hinstance == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		readrecords records = (readrecords)GetProcAddress(hinstance, "CapReadRecords");
-		if (records == NULL)
-		{
-			FreeLibrary(hinstance);
-			return -1701;
-		}
-		else
-		{
-			CONSUMEINFO* _info = info;
-			long s = records(_info);
-			FreeLibrary(hinstance);
-			return s;
-		}
-	}
+	return -1;
 }
 
 //扣费，增加上传功能
@@ -1856,8 +2224,8 @@ long _stdcall CapSetNBCardInfo(long objNo, long UID, long opFare, LPSTR jyDT, __
 	}
 	else
 	{
-		HMODULE hdllInst = LoadLibraryA(CONDLL);
-		if (hdllInst == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_CAP == NULL)
 		{
 			//W_ReadCardLog("ERROR -1801 寻卡加载动态库失败");
 
@@ -1865,11 +2233,11 @@ long _stdcall CapSetNBCardInfo(long objNo, long UID, long opFare, LPSTR jyDT, __
 		}
 		else
 		{
-			setcardinfo Set_CardInfo = (setcardinfo)GetProcAddress(hdllInst, "CapSetNBCardInfo");
+			setcardinfo Set_CardInfo = (setcardinfo)GetProcAddress(HIns_CAP, "CapSetNBCardInfo");
 			if (Set_CardInfo == NULL)
 			{
 				//W_ReadCardLog("ERROR -1701 未能找到CapSetNBCardInfo接口");
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return -1701;
 			}
 			else
@@ -1891,7 +2259,7 @@ long _stdcall CapSetNBCardInfo(long objNo, long UID, long opFare, LPSTR jyDT, __
 				//sprintf(_log, "PARA objNO:%ld,UID:%ld,opFare:%ld,jyDT:%s,psamID:%lld,psamJyNo:%ld,tac:%lld;status:%ld", _objNo, _UID, _opFare, _jyDT, pid, pjyno, tc, status_setinfo);
 				//W_log(_log);
 				//W_ReadCardLog(_log);
-				FreeLibrary(hdllInst);
+				//FreeLibrary(hdllInst);
 				return status_setinfo;
 			}
 		}
@@ -1903,1185 +2271,1872 @@ long _stdcall CapSetNBCardInfo(long objNo, long UID, long opFare, LPSTR jyDT, __
 
 HANDLE _stdcall OpenDevice(int port)
 {
-	//W_ReadCardLog("EVENT 调用函数OpenDevice开始");
-	HMODULE hinstance = LoadLibraryA(CONDLL);
-	if (hinstance == NULL)
+	JudgeHDDType();
+	if (HDDTYPE == 1)
 	{
-		//W_ReadCardLog("ERROR -1 加载动态库失败");
-		return (HANDLE)-1;
-	}
-	else
-	{
-		opendevice OPDV = (opendevice)GetProcAddress(hinstance, "OpenDevice");
-		if (OPDV == NULL)
+		/*HMODULE hinstance = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
 		{
-			//W_ReadCardLog("ERROR -2 打开函数OpenDevice失败");
-			FreeLibrary(hinstance);
-			return (HANDLE)-2;
+			return (HANDLE)-1;
 		}
 		else
 		{
-			HANDLE h_status = OPDV(port);
-			FreeLibrary(hinstance);
-			return h_status;
-		}
+			opendevice OPDV = (opendevice)GetProcAddress(HIns_CAP, "OpenDevice");
+			if (OPDV == NULL)
+			{
+				//FreeLibrary(hinstance);
+				return (HANDLE)-2;
+			}
+			else
+			{
 
+				W_ReadCardLog("OPEN DEVICE");
+				HANDLE h_status = OPDV(port);
+				//FreeLibrary(hinstance);
+				return h_status;
+			}
+
+		}
+	}
+	else
+	{
+		return (HANDLE)-2;
 	}
 }
 int _stdcall CloseDevice(HANDLE hdev)
 {
-	//W_ReadCardLog("EVENT 调用函数CloseDevice开始");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		closedevice close_device = (closedevice)GetProcAddress(hdllInst, "CloseDevice");
-		if (close_device == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			HANDLE _hdev = hdev;
-			int status_closedevice = close_device(_hdev);
-			FreeLibrary(hdllInst);
-			return status_closedevice;
-		}
-	}
-
+	HDDTYPE = -1;
+	return 0;
 }
 int _stdcall PowerOn(HANDLE hdev, int slot, char* atr)
 {
-	//W_ReadCardLog("EVENT 调用函数PowerOn开始");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (HDDTYPE == 1)
 	{
-		//W_ReadCardLog("ERROR -1801 加载动态库失败");
-		return -1801;
-	}
-	else
-	{
-		poweron power_on = (poweron)GetProcAddress(hdllInst, "PowerOn");
-		if (power_on == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
 		{
-			//W_ReadCardLog("ERROR -1701 打开函数PowerOn失败");
-
-			FreeLibrary(hdllInst);
-			return -1701;
+			return -1801;
 		}
 		else
 		{
-			HANDLE _hdev = hdev;
-			int _slot = slot;
-			char* _atr = atr;
-			int status_poweron = power_on(hdev, slot, atr);
-			if (status_poweron != 0)
+			poweron power_on = (poweron)GetProcAddress(HIns_CAP, "PowerOn");
+			if (power_on == NULL)
 			{
-				if (1 == slot)
-				{
-					//W_ReadCardLog("ERROR 用户卡复位失败");
-				}
-				else if (3 == slot)
-				{
-					//W_ReadCardLog("ERROR PSAM卡复位失败");
-
-				}
-				else
-				{
-					char _log[64] = { 0 };
-					sprintf(_log, "ERROR 传入卡槽号参数%d有误", _slot);
-					//W_ReadCardLog(_log);
-				}
+				//FreeLibrary(hdllInst);
+				return -1701;
 			}
-			return status_poweron;
+			else
+			{
+				HANDLE _hdev = hdev;
+				int _slot = slot;
+				char* _atr = atr;
+				int status_poweron = power_on(hdev, slot, atr);
+				return status_poweron;
+			}
 		}
+	}
+	else
+	{
+		return 0;
 	}
 }
 int _stdcall SendAPDU(HANDLE hdev, unsigned char byslot, unsigned char* pbyccommand, unsigned long len, unsigned char* pbyrcommand, int* pnrs)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		sendapdu send_apdu = (sendapdu)GetProcAddress(hdllInst, "SendAPDU");
-		if (send_apdu == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			HANDLE _hdev = hdev;
-			unsigned char _byslot = byslot;
-			unsigned char* _pbyc = pbyccommand;
-			unsigned long _len = len;
-			unsigned char* _pbyr = pbyrcommand;
-			int* _pnrs = pnrs;
-			int stauts_sendapdu = send_apdu(_hdev, _byslot, _pbyc, _len, _pbyr, _pnrs);
-			FreeLibrary(hdllInst);
-			return stauts_sendapdu;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DDF1EF05Info(HANDLE hdev, char* klb, char* gfbb, char* fkjgmc, char* fkjgdm, char* fkjgzs, char* fksj, char* kh, char* aqm, char* xpxlh, char* yycsdm)
 {
-	//W_ReadCardLog("EVENT 调用函数iR_DDF1EF05Info开始");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	W_ReadCardLog("EVENT 调用函数iR_DDF1EF05Info开始");
+	int ret = -1;
+	char outMsg[1024] = { 0 };
+	if (HDDTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_ddf1ef05 ef05 = (r_ddf1ef05)GetProcAddress(hdllInst, "iR_DDF1EF05Info");
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		r_ddf1ef05 ef05 = (r_ddf1ef05)GetProcAddress(HIns_CAP, "iR_DDF1EF05Info");
 		if (ef05 == NULL)
 		{
-			FreeLibrary(hdllInst);
+			//FreeLibrary(hdllInst);
 			return -1701;
 		}
 		else
 		{
-			int stauts_ef05 = ef05(hdev, klb, gfbb, fkjgmc, fkjgdm, fkjgzs, fksj, kh, aqm, xpxlh, yycsdm);
-			FreeLibrary(hdllInst);
-			return stauts_ef05;
+			ret = ef05(hdev, klb, gfbb, fkjgmc, fkjgdm, fkjgzs, fksj, kh, aqm, xpxlh, yycsdm);
+			///FreeLibrary(hdllInst);
 		}
+	}
+	if (HDDTYPE == 2)
+	{
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			readcardinfo ef05 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadCardInfo");
+			if (ef05 == NULL)
+			{
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				char errMsg[1024] = { 0 };
+				ret = ef05(outMsg, errMsg);
+				if (ret == 0) //读居民健康卡成功
+				{
+					W_ReadCardLog("居民健康卡读取成功");
+					v.clear();
+					string strOutMsg(outMsg);
+					my_split(strOutMsg, c_spliter, v);
+					strcpy(klb, v[0].c_str());
+					strcpy(gfbb, v[1].c_str());
+					strcpy(fkjgmc, v[2].c_str());
+					strcpy(fkjgdm, v[3].c_str());
+					strcpy(fksj, v[4].c_str());
+					strcpy(kh, v[5].c_str());
+					strcpy(aqm, v[6].c_str());
+					strcpy(xpxlh, v[7].c_str());
+					strcpy(yycsdm, v[8].c_str());
+					//FreeLibrary(hdllInst);
+					return 0;
+				}
+
+			}
+		}
+	}
+	if (ret != 0)//用户卡复位失败，启动扫码
+	{
+		if (js_vl["flag"].asString() == "1")
+		{
+			W_ReadCardLog("INFO 查询成功");
+			/*Json::Value js_dep;
+			Json::Reader reader;
+			string str_dep = decrypt(js_vl["data"].asString());
+			reader.parse(str_dep, js_dep);*/
+			//处理出参
+			strcpy(kh, js_vl["content"]["data"]["papersNum"].asString().c_str());
+			strcpy(ALLIDCARD, kh);
+			return 0;
+		}
+		else
+		{
+			W_ReadCardLog("ERROR 查询失败");
+			return -11;
+		}
+	}
+	else
+	{
+		return -1;
 	}
 }
 int _stdcall iW_DDF1EF05Info(HANDLE hdev, char* klb, char* gfbb, char* fkjgmc, char* fkjgdm, char* fkjgzs, char* fksj, char* kh, char* aqm, char* xpxlh, char* yycsdm)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_ddf1ef05 ef05 = (w_ddf1ef05)GetProcAddress(hdllInst, "iW_DDF1EF05Info");
-		if (ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			int stauts_ef05 = ef05(hdev, klb, gfbb, fkjgmc, fkjgdm, fkjgzs, fksj, kh, aqm, xpxlh, yycsdm);
-			FreeLibrary(hdllInst);
-			return stauts_ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DDF1EF06Info(HANDLE hdev, char* xm, char* xb, char* mz, char* csrq, char* sfzh)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	int ret = -1;
+	RTYPE = -1;
+	char outMsg[1024] = { 0 };
+	if (HDDTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_ddf1ef06 ef06 = (r_ddf1ef06)GetProcAddress(hdllInst, "iR_DDF1EF06Info");
+		//HMODULE hdllInst = LoadLibraryA(CAPDLL);
+		r_ddf1ef06 ef06 = (r_ddf1ef06)GetProcAddress(HIns_CAP, "iR_DDF1EF06Info");
 		if (ef06 == NULL)
 		{
-			FreeLibrary(hdllInst);
+			FreeLibrary(HIns_CAP);
 			return -1701;
 		}
 		else
 		{
+			char _xm[20] = { 0 };
+			char _xb[20] = { 0 };
+			char _mz[20] = { 0 };
+			char _csrq[30] = { 0 };
+			char _sfzh[20] = { 0 };
+			ret = ef06(hdev, _xm, _xb, _mz, _csrq, _sfzh);
+			strcpy(xm, _xm);
+			strcpy(xb, _xb);
+			strcpy(mz, _mz);
+			strcpy(csrq, _csrq);
+			strcpy(sfzh, _sfzh);
+			char log[100];
+			sprintf(log, "READ EF06 STATUS:%d,CNAME:%s,GENDER:%s,SFZ:%s", ret, _xm, _xb, _sfzh);
+			W_ReadCardLog(log);
+			//FreeLibrary(hdllInst);
 
-			int stauts_ef06 = ef06(hdev, xm, xb, mz, csrq, sfzh);
-			FreeLibrary(hdllInst);
-			return stauts_ef06;
 		}
+	}
+	if (HDDTYPE == 2)
+	{
+		//HMODULE hdllInst = LoadLibraryA(CONDLL);
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			readcardinfo ef06 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+			if (ef06 == NULL)
+			{
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				char errMsg[1024] = { 0 };
+				ret = ef06(outMsg, errMsg);
+				/*char log[1024];
+				sprintf(log, "DF1EF06 读卡状态：%d,返回信息：%s，错误信息：%s", ret, outMsg, errMsg);
+				W_ReadCardLog(log);*/
+				if (ret == 0) //读居民健康卡成功
+				{
+					RTYPE = 1;
+					v.clear();
+					string strOutMsg(outMsg);
+					my_split(strOutMsg, c_spliter, v);
+					strcpy(xm, v[0].c_str());
+					strcpy(xb, v[1].c_str());
+					strcpy(mz, v[2].c_str());
+					strcpy(csrq, v[3].c_str());
+					strcpy(sfzh, v[4].c_str());
+					char log[100];
+					sprintf(log, "ReadPeopleInfo STATUS:%d,CNAME:%s,GENDER:%s,SFZ:%s", ret, xm, xb, sfzh);
+					W_ReadCardLog(log);
+
+					//FreeLibrary(hdllInst);
+					return 0;
+				}
+			}
+		}
+	}
+	if (ret != 0)
+	{
+		RTYPE = 2;
+		int rc = GetComInputInfo(outMsg);
+		if (rc == 0)//扫码成功
+		{
+			char req_resv[1024];
+			LPSTR req_ip;
+			req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+			short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+			char log[100];
+			sprintf(log, "配置文件IP：%s,PORT:%d", req_ip, _port);
+			W_ReadCardLog(log);
+			
+			//定义并初始化Json对象
+			Json::Value sendvalue;
+			//string content(_info);
+			string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+			string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+			/*
+			==========================
+			*/
+			req_ip = "10.241.0.138";
+			_port = 8090;
+			orgcode = "Y000001";
+			serialNo = "JCYH000001";
+			/*
+				=====================
+			*/
+			sendvalue["content"] = outMsg;
+			sendvalue["organizationCode"] = orgcode;
+			sendvalue["serialNumber"] = serialNo;
+			sendvalue["method"] = "search";
+			string sendJson = sendvalue.toStyledString();
+			char _send_buff[1024] = { 0 };
+			string str_sendbuff = sendJson;
+			memcpy(_send_buff, str_sendbuff.c_str(), 1024);
+			//initKV();
+			//string str_sendbuff = encrypt(sendJson);
+			//memcpy(_send_buff, str_sendbuff.c_str(), 1024);
+
+			W_ReadCardLog(str_sendbuff.c_str());
+			//提交接口
+			long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+			if (0 == ret_sendpost)
+			{
+				char _rev_temp[1024] = { 0 };
+				TransCharacter(req_resv, _rev_temp);//处理乱码
+													//截取json
+				string str_rev(_rev_temp);
+				string json_rel;
+				int json_bg = str_rev.find_first_of("{", 0);
+				int json_end = str_rev.find_last_of("}");
+				if (json_end > json_bg)
+				{
+					json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+					W_ReadCardLog(json_rel.c_str());
+					//解析json
+					js_vl.clear();
+					Json::Reader reader;
+					Json::Value js_dep;
+					try
+					{
+						if (reader.parse(json_rel, js_vl))
+						{
+							if (js_vl["flag"].asString() == "1")
+							{
+								try
+								{
+									//string str_dep = decrypt(js_vl["content"]["data"].asString());
+									//char deptemp[1024] = { 0 };
+									//TransCharacter(str_dep.c_str(), deptemp);
+									//string strtemp(deptemp);
+									//string strlog = "解密后字符串：" + strtemp;
+									//W_ReadCardLog(strlog.c_str());
+									//reader.parse(strtemp, js_dep);
+									W_ReadCardLog("JSON解析完成");
+									strcpy(xm, js_vl["content"]["data"]["userName"].asString().c_str());
+									strcpy(sfzh, js_vl["content"]["data"]["papersNum"].asString().c_str());
+									/*strcpy(xm, js_dep["userName"].asString().c_str());
+									strcpy(sfzh, js_dep["papersNum"].asString().c_str());*/
+									strcpy(ALLIDCARD, sfzh);
+									if (18 == strlen(sfzh))
+									{
+										string str_sfz(sfzh);
+										string str_sex = str_sfz.substr(16, 1);
+										string str_csrq = str_sfz.substr(6, 8);
+										int sex = (stoi(str_sex) % 2) == 0 ? 2 : 1;
+										itoa(sex, xb, 10);
+										strcpy(csrq, str_csrq.c_str());
+										char log[200] = { 0 };
+										sprintf(log, "姓名：%s,性别：%s,出生日期：%s,身份证号：%s", xm, xb, csrq, sfzh);
+										W_ReadCardLog(log);
+										return 0;
+									}
+								}
+								catch (const std::exception&)
+								{
+									return -1;
+								}
+							}
+							else
+							{
+								W_ReadCardLog("ERROR 查询失败");
+								return -11;
+							}
+						}
+					}
+					catch (const std::exception&ex)
+					{
+						return -13;
+					}
+
+				}
+				else
+				{
+					W_ReadCardLog("ERROR 返回信息格式有误");
+					return -12;
+				}
+			}
+			else
+			{
+				return ret_sendpost;
+			}
+		}
+		else
+		{
+			return -1;
+		}
+
+
 	}
 }
 int _stdcall iW_DDF1EF06Info(HANDLE hdev, char* xm, char* xb, char* mz, char* csrq, char* sfzh)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_ddf1ef06 ef06 = (w_ddf1ef06)GetProcAddress(hdllInst, "iW_DDF1EF06Info");
-		if (ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			int stauts_ef06 = ef06(hdev, xm, xb, mz, csrq, sfzh);
-			FreeLibrary(hdllInst);
-			return stauts_ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DDF1EF07Info(HANDLE hdev, char* zp_path)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df1ef07 ef07 = (r_df1ef07)GetProcAddress(hdllInst, "iR_DDF1EF07Info");
-		if (ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			int stauts_ef07 = ef07(hdev, zp_path);
-			FreeLibrary(hdllInst);
-			return stauts_ef07;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DDF1EF07Info(HANDLE hdev, char* zp_path)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df1ef07 ef07 = (w_df1ef07)GetProcAddress(hdllInst, "iW_DDF1EF07Info");
-		if (ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			int stauts_ef07 = ef07(hdev, zp_path);
-			FreeLibrary(hdllInst);
-			return stauts_ef07;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DDF1EF08Info(HANDLE hdev, char* kyxq, char* brdh1, char* brdh2, char* ylfs1, char* ylfs2, char* ylfs3)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	int ret = -1;
+	char outMsg[1024] = { 0 };
+	if (HDDTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_ddf1ef08 ef08 = (r_ddf1ef08)GetProcAddress(hdllInst, "iR_DDF1EF08Info");
-		if (ef08 == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			return -1801;
 		}
 		else
 		{
+			r_ddf1ef08 ef08 = (r_ddf1ef08)GetProcAddress(HIns_CAP, "iR_DDF1EF08Info");
+			if (ef08 == NULL)
+			{
+				W_ReadCardLog("DDF1EF08");
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
 
-			int stauts_ef08 = ef08(hdev, kyxq, brdh1, brdh2, ylfs1, ylfs2, ylfs3);
-			FreeLibrary(hdllInst);
-			return stauts_ef08;
+				ret = ef08(hdev, kyxq, brdh1, brdh2, ylfs1, ylfs2, ylfs3);
+				//FreeLibrary(hdllInst);
+			}
 		}
+	}
+	if (HDDTYPE == 2)
+	{
+		//HMODULE hdllInst = LoadLibraryA(CONDLL);
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			readpersoninfo ef08 = (readpersoninfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+			if (ef08 == NULL)
+			{
+				W_ReadCardLog("DDF1EF08");
+
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				char errMsg[1024] = { 0 };
+				ret = ef08(outMsg, errMsg);
+				if (ret == 0) //读居民健康卡成功
+				{
+					v.clear();
+					string strOutMsg(outMsg);
+					my_split(strOutMsg, c_spliter, v);
+					strcpy(kyxq, v[5].c_str());
+					strcpy(brdh1, v[6].c_str());
+					strcpy(brdh2, v[7].c_str());
+					strcpy(ylfs1, v[8].c_str());
+					strcpy(ylfs2, v[9].c_str());
+					strcpy(ylfs3, v[10].c_str());
+					//FreeLibrary(hdllInst);
+					return 0;
+				}
+
+
+			}
+
+		}
+	}
+	if (ret != 0)
+	{
+		if (js_vl["flag"].asString() == "1")
+		{
+			/*Json::Value js_dep;
+			Json::Reader reader;
+			string str_dep = decrypt(js_vl["data"].asString());
+			reader.parse(str_dep, js_dep);*/
+			//处理出参
+			try
+			{
+				strcpy(brdh1, js_vl["content"]["data"]["telephone"].asString().c_str());
+				strcpy(brdh2, js_vl["content"]["data"]["telephone"].asString().c_str());
+				return 0;
+			}
+			catch (const std::exception&)
+			{
+				return -1;
+			}
+
+		}
+		else
+		{
+			return -11;
+		}
+	}
+	else
+	{
+		return -1;
 	}
 }
 int _stdcall iW_DDF1EF08Info(HANDLE hdev, char* kyxq, char* brdh1, char* brdh2, char* ylfs1, char* ylfs2, char* ylfs3)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_ddf1ef08 ef08 = (w_ddf1ef08)GetProcAddress(hdllInst, "iW_DDF1EF08Info");
-		if (ef08 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-
-			int stauts_ef08 = ef08(hdev, kyxq, brdh1, brdh2, ylfs1, ylfs2, ylfs3);
-			FreeLibrary(hdllInst);
-			return stauts_ef08;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF01EF05Info(HANDLE hdev, char* dzlb1, char* dz1, char* dzlb2, char* dz2)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	int ret = -1;
+	char outMsg[1024] = { 0 };
+	if (RTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_df01ef05 df01ef05 = (r_df01ef05)GetProcAddress(hdllInst, "iR_DF01EF05Info");
-		if (df01ef05 == NULL)
+
+
+		if (HDDTYPE == 1)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			//HMODULE hdllInst = LoadLibraryA(CAPDLL);
+			if (HIns_CAP == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				r_df01ef05 df01ef05 = (r_df01ef05)GetProcAddress(HIns_CAP, "iR_DF01EF05Info");
+				if (df01ef05 == NULL)
+				{
+					W_ReadCardLog("DF01EF05");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+
+					ret = df01ef05(hdev, dzlb1, dz1, dzlb2, dz2);
+					//FreeLibrary(hdllInst);
+				}
+			}
+		}
+		if (HDDTYPE == 2)
+		{
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readpersoninfo df01ef05 = (readpersoninfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (df01ef05 == NULL)
+				{
+					W_ReadCardLog("DF01EF05");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					char errMsg[1024] = { 0 };
+					ret = df01ef05(outMsg, errMsg);
+					if (ret == 0)//读居民健康卡成功
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						strcpy(dzlb1, v[11].c_str());
+						strcpy(dz1, v[12].c_str());
+						strcpy(dzlb2, v[13].c_str());
+						strcpy(dz2, v[14].c_str());
+						//FreeLibrary(hdllInst);
+						return 0;
+					}
+
+
+				}
+			}
+		}
+	}
+	if (RTYPE= 2)
+	{
+		W_ReadCardLog("RTYPE 2");
+		if (js_vl["flag"].asString() == "1")
+		{
+			/*Json::Value js_dep;
+			Json::Reader reader;
+			string str_dep = decrypt(js_vl["data"].asString());
+			reader.parse(str_dep, js_dep);*/
+			//处理出参
+			try
+			{
+				string straddr = js_vl["content"]["data"]["patientAddr"].asString();
+				strcpy(dz1, js_vl["content"]["data"]["patientAddr"].asString().c_str());
+				strcpy(dz2, js_vl["content"]["data"]["permanentResiAddr"].asString().c_str());
+				return 0;
+			}
+			catch (const std::exception&)
+			{
+				return -1;
+			}
+
 		}
 		else
 		{
-
-			int stauts_df01ef05 = df01ef05(hdev, dzlb1, dz1, dzlb2, dz2);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef05;
+			return -11;
 		}
+	}
+	else
+	{
+		return -1;
 	}
 }
 int _stdcall iW_DF01EF05Info(HANDLE hdev, char* dzlb1, char* dz1, char* dzlb2, char* dz2)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df01ef05 df01ef05 = (w_df01ef05)GetProcAddress(hdllInst, "iW_DF01EF05Info");
-		if (df01ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df01ef05 = df01ef05(hdev, dzlb1, dz1, dzlb2, dz2);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF01EF06Info(HANDLE hdev, char* xm1, char* gx1, char* dh1, char* xm2, char* gx2, char* dh2, char* xm3, char* gx3, char* dh3)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (RTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_df01ef06 df01ef06 = (r_df01ef06)GetProcAddress(hdllInst, "iR_DF01EF06Info");
-		if (df01ef06 == NULL)
+		int ret = -1;
+		char outMsg[1024] = { 0 };
+		if (HDDTYPE == 1)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+			if (HIns_CAP == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				r_df01ef06 df01ef06 = (r_df01ef06)GetProcAddress(HIns_CAP, "iR_DF01EF06Info");
+				if (df01ef06 == NULL)
+				{
+					W_ReadCardLog("DF01EF06");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					HANDLE _hdev = hdev;
+					char* _xm1 = xm1;
+					char* _gx1 = gx1;
+					char* _dh1 = dh1;
+					char* _xm2 = xm2;
+					char* _gx2 = gx2;
+					char* _dh2 = dh2;
+					char* _xm3 = xm3;
+					char* _gx3 = gx3;
+					char* _dh3 = dh3;
+					ret = df01ef06(_hdev, _xm1, _gx1, _dh1, _xm2, _gx2, _dh2, _xm3, _gx3, _dh3);
+					//FreeLibrary(hdllInst);
+					return ret;
+				}
+			}
 		}
-		else
+		if (HDDTYPE == 2)
 		{
-			HANDLE _hdev = hdev;
-			char* _xm1 = xm1;
-			char* _gx1 = gx1;
-			char* _dh1 = dh1;
-			char* _xm2 = xm2;
-			char* _gx2 = gx2;
-			char* _dh2 = dh2;
-			char* _xm3 = xm3;
-			char* _gx3 = gx3;
-			char* _dh3 = dh3;
-			int stauts_df01ef06 = df01ef06(_hdev, _xm1, _gx1, _dh1, _xm2, _gx2, _dh2, _xm3, _gx3, _dh3);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef06;
+
+
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readpersoninfo df01ef06 = (readpersoninfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (df01ef06 == NULL)
+				{
+					W_ReadCardLog("DF01EF06");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+
+					char errMsg[1024] = { 0 };
+					ret = df01ef06(outMsg, errMsg);
+
+					if (ret == 0)
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						strcpy(xm1, v[15].c_str());
+						strcpy(gx1, v[16].c_str());
+						strcpy(dh1, v[17].c_str());
+						strcpy(xm2, v[18].c_str());
+						strcpy(gx2, v[20].c_str());
+						strcpy(dh2, v[21].c_str());
+						strcpy(xm3, v[22].c_str());
+						strcpy(gx3, v[23].c_str());
+						strcpy(dh3, v[24].c_str());
+						//FreeLibrary(hdllInst);
+					}
+					return ret;
+				}
+			}
 		}
 	}
 }
 int _stdcall iW_DF01EF06Info(HANDLE hdev, char* xm1, char* gx1, char* dh1, char* xm2, char* gx2, char* dh2, char* xm3, char* gx3, char* dh3)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df01ef06 df01ef06 = (w_df01ef06)GetProcAddress(hdllInst, "iW_DF01EF06Info");
-		if (df01ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df01ef06 = df01ef06(hdev, xm1, gx1, dh1, xm2, gx2, dh2, xm3, gx3, dh3);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef06;
-		}
-	}
+	return -2;
 }
 int _stdcall iR_DF01EF07Info(HANDLE hdev, char* whcd, char* hyzk, char* zy)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (RTYPE == 1)
 	{
-		return -1801;
+		W_ReadCardLog("婚姻状态读取，R1");
+		if (HDDTYPE == 1)
+		{
+			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+			if (HIns_CAP == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				r_df01ef07 df01ef07 = (r_df01ef07)GetProcAddress(HIns_CAP, "iR_DF01EF07Info");
+				if (df01ef07 == NULL)
+				{
+					W_ReadCardLog("DF01EF07");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					int stauts_df01ef07 = df01ef07(hdev, whcd, hyzk, zy);
+					//FreeLibrary(hdllInst);
+					return stauts_df01ef07;
+				}
+			}
+		}
+		if (HDDTYPE == 2)
+		{
+
+
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readpersoninfo df01ef07 = (readpersoninfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (df01ef07 == NULL)
+				{
+					W_ReadCardLog("DF01EF07");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					char outMsg[65535] = { 0 };
+					char errMsg[1024] = { 0 };
+					int stauts_df01ef07 = df01ef07(outMsg, errMsg);
+					char log[100];
+					sprintf(log, "读卡状态：%d", stauts_df01ef07);
+					W_ReadCardLog(log);
+					if (stauts_df01ef07 == 0)
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						strcpy(whcd, v[25].c_str());
+						strcpy(hyzk, v[26].c_str());
+						strcpy(zy, v[27].c_str());
+						//FreeLibrary(hdllInst);
+					}
+					return stauts_df01ef07;
+
+				}
+			}
+		}
 	}
 	else
 	{
-		r_df01ef07 df01ef07 = (r_df01ef07)GetProcAddress(hdllInst, "iR_DF01EF07Info");
-		if (df01ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df01ef07 = df01ef07(hdev, whcd, hyzk, zy);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef07;
-		}
+		W_ReadCardLog("婚姻状态读取，R2");
+
+		return 0;
 	}
 }
 int _stdcall iW_DF01EF07Info(HANDLE hdev, char* whcd, char* hyzk, char* zy)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df01ef07 df01ef07 = (w_df01ef07)GetProcAddress(hdllInst, "iW_DF01EF07Info");
-		if (df01ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df01ef07 = df01ef07(hdev, whcd, hyzk, zy);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef07;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF01EF08Info(HANDLE hdev, char* zjlb, char* zjhm, char* jkdah, char* xnhzh)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (RTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_df01ef08 df01ef08 = (r_df01ef08)GetProcAddress(hdllInst, "iR_DF01EF08Info");
-		if (df01ef08 == NULL)
+
+
+		if (HDDTYPE == 1)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+			if (HIns_CAP == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				r_df01ef08 df01ef08 = (r_df01ef08)GetProcAddress(HIns_CAP, "iR_DF01EF08Info");
+				if (df01ef08 == NULL)
+				{
+					W_ReadCardLog("DF01EF08");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					int stauts_df01ef08 = df01ef08(hdev, zjlb, zjhm, jkdah, xnhzh);
+					//FreeLibrary(hdllInst);
+					return stauts_df01ef08;
+				}
+			}
 		}
-		else
+		if (HDDTYPE == 2)
 		{
-			int stauts_df01ef08 = df01ef08(hdev, zjlb, zjhm, jkdah, xnhzh);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef08;
+
+
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readpersoninfo df01ef08 = (readpersoninfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (df01ef08 == NULL)
+				{
+					W_ReadCardLog("DF01EF08");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					char outMsg[65535] = { 0 };
+					char errMsg[1024] = { 0 };
+					int stauts_df01ef08 = df01ef08(outMsg, errMsg);
+					char log[100];
+					sprintf(log, "读卡状态：%d", stauts_df01ef08);
+					W_ReadCardLog(log);
+					if (stauts_df01ef08 == 0)
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						strcpy(zjlb, v[27].c_str());
+						strcpy(zjhm, v[28].c_str());
+						strcpy(jkdah, v[29].c_str());
+						strcpy(xnhzh, v[30].c_str());
+						//FreeLibrary(hdllInst);
+					}
+
+					return stauts_df01ef08;
+				}
+			}
 		}
 	}
 }
 int _stdcall iW_DF01EF08Info(HANDLE hdev, char* zjlb, char* zjhm, char* jkdah, char* xnhzh)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df01ef08 df01ef08 = (w_df01ef08)GetProcAddress(hdllInst, "iW_DF01EF08Info");
-		if (df01ef08 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df01ef08 = df01ef08(hdev, zjlb, zjhm, jkdah, xnhzh);
-			FreeLibrary(hdllInst);
-			return stauts_df01ef08;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF02EF05Info(HANDLE hdev, char* abo, char* rh, char* xc, char* xzb, char* xnxgb, char* dxb, char* nxwl, char* tnb, char* qgy, char* tx, char* qgyz, char* qgqs, char* kzxyz, char* xzqbq, char* qtyxjs)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (RTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_df02ef05 df02ef05 = (r_df02ef05)GetProcAddress(hdllInst, "iR_DF02EF05Info");
-		if (df02ef05 == NULL)
+		if (HDDTYPE == 1)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_CAP == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				r_df02ef05 df02ef05 = (r_df02ef05)GetProcAddress(HIns_CAP, "iR_DF02EF05Info");
+				if (df02ef05 == NULL)
+				{
+					W_ReadCardLog("DF02EF05");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					int stauts_df02ef05 = df02ef05(hdev, abo, rh, xc, xzb, xnxgb, dxb, nxwl, tnb, qgy, tx, qgyz, qgqs, kzxyz, xzqbq, qtyxjs);
+					//FreeLibrary(hdllInst);
+					return stauts_df02ef05;
+				}
+			}
 		}
 		else
 		{
-			int stauts_df02ef05 = df02ef05(hdev, abo, rh, xc, xzb, xnxgb, dxb, nxwl, tnb, qgy, tx, qgyz, qgqs, kzxyz, xzqbq, qtyxjs);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef05;
+			return 0;
 		}
 	}
 }
 int _stdcall iW_DF02EF05Info(HANDLE hdev, char* abo, char* rh, char* xc, char* xzb, char* xnxgb, char* dxb, char* nxwl, char* tnb, char* qgy, char* tx, char* qgyz, char* qgqs, char* kzxyz, char* xzqbq, char* qtyxjs)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df02ef05 df02ef05 = (w_df02ef05)GetProcAddress(hdllInst, "iW_DF02EF05Info");
-		if (df02ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef05 = df02ef05(hdev, abo, rh, xc, xzb, xnxgb, dxb, nxwl, tnb, qgy, tx, qgyz, qgqs, kzxyz, xzqbq, qtyxjs);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF02EF06Info(HANDLE hdev, char* jsb)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df02ef06 df02ef06 = (r_df02ef06)GetProcAddress(hdllInst, "iR_DF02EF06Info");
-		if (df02ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef06 = df02ef06(hdev, jsb);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DF02EF06Info(HANDLE hdev, char* jsb)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df02ef06 df02ef06 = (w_df02ef06)GetProcAddress(hdllInst, "iW_DF02EF06Info");
-		if (df02ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef06 = df02ef06(hdev, jsb);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF02EF07Info(HANDLE hdev, int recordNo, char* gmwz, char* gmmc)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df02ef07 df02ef07 = (r_df02ef07)GetProcAddress(hdllInst, "iR_DF02EF07Info");
-		if (df02ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef07 = df02ef07(hdev, recordNo, gmwz, gmmc);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef07;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DF02EF07Info(HANDLE hdev, char* gmwz, char* gmmc)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df02ef07 df02ef07 = (w_df02ef07)GetProcAddress(hdllInst, "iW_DF02EF07Info");
-		if (df02ef07 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef07 = df02ef07(hdev, gmwz, gmmc);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef07;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF02EF08Info(HANDLE hdev, int recordNo, char* jzmc, char* jzsj)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df02ef08 df02ef08 = (r_df02ef08)GetProcAddress(hdllInst, "iR_DF02EF08Info");
-		if (df02ef08 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef08 = df02ef08(hdev, recordNo, jzmc, jzsj);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef08;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DF02EF08Info(HANDLE hdev, char* jzmc, char* jzsj)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df02ef08 df02ef08 = (w_df02ef08)GetProcAddress(hdllInst, "iW_DF02EF08Info");
-		if (df02ef08 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df02ef08 = df02ef08(hdev, jzmc, jzsj);
-			FreeLibrary(hdllInst);
-			return stauts_df02ef08;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF03EF05Info(HANDLE hdev, char* jl1, char* jl2, char* jl3)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df03ef05 df03ef05 = (r_df03ef05)GetProcAddress(hdllInst, "iR_DF03EF05Info");
-		if (df03ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef05 = df03ef05(hdev, jl1, jl2, jl3);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DF03EF05Info(HANDLE hdev, int recordNo)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df03ef05 df03ef05 = (w_df03ef05)GetProcAddress(hdllInst, "iW_DF03EF05Info");
-		if (df03ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef05 = df03ef05(hdev, recordNo);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iErase_DF03EF05Info(HANDLE hdev, int recordNo)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		e_df03ef05 df03ef05 = (e_df03ef05)GetProcAddress(hdllInst, "iErase_DF03EF05Info");
-		if (df03ef05 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef05 = df03ef05(hdev, recordNo);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef05;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF03EF06Info(HANDLE hdev, char* mzbs1, char* mzbs2, char* mzbs3, char* mzbs4, char* mzbs5)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df03ef06 df03ef06 = (r_df03ef06)GetProcAddress(hdllInst, "iR_DF03EF06Info");
-		if (df03ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef06 = df03ef06(hdev, mzbs1, mzbs2, mzbs3, mzbs4, mzbs5);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iW_DF03EF06Info(HANDLE hdev, int record)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df03ef06 df03ef06 = (w_df03ef06)GetProcAddress(hdllInst, "iW_DF03EF06Info");
-		if (df03ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef06 = df03ef06(hdev, record);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iErase_DF03EF06Info(HANDLE hdev, int record)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		e_df03ef06 df03ef06 = (e_df03ef06)GetProcAddress(hdllInst, "iErase_DF03EF06Info");
-		if (df03ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ef06 = df03ef06(hdev, record);
-			FreeLibrary(hdllInst);
-			return stauts_df03ef06;
-		}
-	}
+	return 0;
 }
 int _stdcall iR_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		r_df03ee df03ee = (r_df03ee)GetProcAddress(hdllInst, "iR_DF03EEInfo");
-		if (df03ee == NULL)
+
+
+		if (HDDTYPE == 1)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_df03ee = df03ee(hdev, record, szdata, npos, nlen, nstyle);
-			FreeLibrary(hdllInst);
-			return stauts_df03ee;
-		}
-	}
-}
-int _stdcall iW_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
-{
-	//W_ReadCardLog("EVENT 调用写住院信息接口iW_DF03EEInfo开始");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		w_df03ee df03ee = (w_df03ee)GetProcAddress(hdllInst, "iW_DF03EEInfo");
-		if (df03ee == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			char _log[128] = { 0 };
-			int stauts_df03ee = df03ee(hdev, record, szdata, npos, nlen, nstyle);
-			if (0 == stauts_df03ee)
+			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+			if (HIns_CAP == NULL)
 			{
-				sprintf(_log, "INFO record:%d,npos:%d,nlen:%d,写入成功", record, npos, nlen);
+				return -1801;
 			}
 			else
 			{
-				sprintf(_log, "ERROR record:%d,npos:%d,nlen:%d,写入失败，返回%d", record, npos, nlen, stauts_df03ee);
+				r_df03ee df03ee = (r_df03ee)GetProcAddress(HIns_CAP, "iR_DF03EEInfo");
+				if (df03ee == NULL)
+				{
+					W_ReadCardLog("DF03EE");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					int stauts_df03ee = df03ee(hdev, record, szdata, npos, nlen, nstyle);
+					//FreeLibrary(hdllInst);
+					return stauts_df03ee;
+				}
 			}
-			FreeLibrary(hdllInst);
-			return stauts_df03ee;
+		}
+		if (HDDTYPE == 2)
+		{
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readEEinfo df03ee = (readEEinfo)GetProcAddress(HIns_WQ, "ReadEEFileInfo");
+				if (df03ee == NULL)
+				{
+					W_ReadCardLog("DF03EE");
+
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					char outMsg[65535] = { 0 };
+					char errMsg[1024] = { 0 };
+					int stauts_df03ee = df03ee(record, outMsg, errMsg);
+					if (stauts_df03ee == 0)
+					{
+						if ((npos == 0) && (nlen == 1639))//全读
+						{
+							strcpy(szdata, outMsg);
+						}
+						else
+						{
+							v.clear();
+							string strOutMsg(outMsg);
+							my_split(strOutMsg, c_spliter, v);
+							switch (npos)
+							{
+							case 0:strcpy(szdata, v[0].c_str());
+								break;
+							case 70: strcpy(szdata, v[1].c_str());
+								break;
+							case 80: strcpy(szdata, v[2].c_str());
+								break;
+							case 84: strcpy(szdata, v[3].c_str());
+								break;
+							case 86: strcpy(szdata, v[4].c_str());
+								break;
+							case 104: strcpy(szdata, v[5].c_str());
+								break;
+							case 154: strcpy(szdata, v[6].c_str());
+								break;
+							case 155: strcpy(szdata, v[7].c_str());
+								break;
+							case 205: strcpy(szdata, v[8].c_str());
+								break;
+							case 212: strcpy(szdata, v[9].c_str());
+								break;
+							case 213: strcpy(szdata, v[10].c_str());
+								break;
+							case 214: strcpy(szdata, v[11].c_str());
+								break;
+							case 264: strcpy(szdata, v[12].c_str());
+								break;
+							case 271: strcpy(szdata, v[13].c_str());
+								break;
+							case 275: strcpy(szdata, v[14].c_str());
+								break;
+							case 295: strcpy(szdata, v[15].c_str());
+								break;
+							case 296: strcpy(szdata, v[16].c_str());
+								break;
+							case 316: strcpy(szdata, v[17].c_str());
+								break;
+							case 317: strcpy(szdata, v[18].c_str());
+								break;
+							case 318: strcpy(szdata, v[19].c_str());
+								break;
+							case 398: strcpy(szdata, v[20].c_str());
+								break;
+							case 403: strcpy(szdata, v[21].c_str());
+								break;
+							case 407: strcpy(szdata, v[22].c_str());
+								break;
+							case 457: strcpy(szdata, v[23].c_str());
+								break;
+							case 458: strcpy(szdata, v[24].c_str());
+								break;
+							case 459: strcpy(szdata, v[25].c_str());
+								break;
+							case 460: strcpy(szdata, v[26].c_str());
+								break;
+							case 461: strcpy(szdata, v[27].c_str());
+								break;
+							case 511: strcpy(szdata, v[28].c_str());
+								break;
+							case 518: strcpy(szdata, v[29].c_str());
+								break;
+							case 522: strcpy(szdata, v[30].c_str());
+								break;
+							case 542: strcpy(szdata, v[31].c_str());
+								break;
+							case 543: strcpy(szdata, v[32].c_str());
+								break;
+							case 563: strcpy(szdata, v[33].c_str());
+								break;
+							case 564: strcpy(szdata, v[34].c_str());
+								break;
+							case 565: strcpy(szdata, v[35].c_str());
+								break;
+							case 645: strcpy(szdata, v[36].c_str());
+								break;
+							case 650: strcpy(szdata, v[37].c_str());
+								break;
+							case 654: strcpy(szdata, v[38].c_str());
+								break;
+							case 704: strcpy(szdata, v[39].c_str());
+								break;
+							case 705: strcpy(szdata, v[40].c_str());
+								break;
+							case 706: strcpy(szdata, v[41].c_str());
+								break;
+							case 707: strcpy(szdata, v[42].c_str());
+								break;
+							case 708: strcpy(szdata, v[43].c_str());
+								break;
+							case 758: strcpy(szdata, v[44].c_str());
+								break;
+							case 765: strcpy(szdata, v[45].c_str());
+								break;
+							case 769: strcpy(szdata, v[46].c_str());
+								break;
+							case 789: strcpy(szdata, v[47].c_str());
+								break;
+							case 790: strcpy(szdata, v[48].c_str());
+								break;
+							case 810: strcpy(szdata, v[49].c_str());
+								break;
+							case 811: strcpy(szdata, v[50].c_str());
+								break;
+							case 812: strcpy(szdata, v[51].c_str());
+								break;
+							case 892: strcpy(szdata, v[52].c_str());
+								break;
+							case 897: strcpy(szdata, v[53].c_str());
+								break;
+							case 901: strcpy(szdata, v[54].c_str());
+								break;
+							case 951: strcpy(szdata, v[55].c_str());
+								break;
+							case 952: strcpy(szdata, v[56].c_str());
+								break;
+							case 953: strcpy(szdata, v[57].c_str());
+								break;
+							case 954: strcpy(szdata, v[58].c_str());
+								break;
+							case 956: strcpy(szdata, v[59].c_str());
+								break;
+							case 966: strcpy(szdata, v[60].c_str());
+								break;
+							case 967: strcpy(szdata, v[61].c_str());
+								break;
+							case 969: strcpy(szdata, v[62].c_str());
+								break;
+							case 979: strcpy(szdata, v[63].c_str());
+								break;
+							case 980: strcpy(szdata, v[64].c_str());
+								break;
+							case 982: strcpy(szdata, v[65].c_str());
+								break;
+							case 992: strcpy(szdata, v[66].c_str());
+								break;
+							case 993: strcpy(szdata, v[67].c_str());
+								break;
+							case 995: strcpy(szdata, v[68].c_str());
+								break;
+							case 1005: strcpy(szdata, v[69].c_str());
+								break;
+							case 1007: strcpy(szdata, v[70].c_str());
+								break;
+							case 1009: strcpy(szdata, v[71].c_str());
+								break;
+							case 1013: strcpy(szdata, v[72].c_str());
+								break;
+							case 1063: strcpy(szdata, v[73].c_str());
+								break;
+							case 1066: strcpy(szdata, v[74].c_str());
+								break;
+							case 1067: strcpy(szdata, v[75].c_str());
+								break;
+							case 1068: strcpy(szdata, v[76].c_str());
+								break;
+							case 1069: strcpy(szdata, v[77].c_str());
+								break;
+							case 1089: strcpy(szdata, v[78].c_str());
+								break;
+							case 1090: strcpy(szdata, v[79].c_str());
+								break;
+							case 1095: strcpy(szdata, v[80].c_str());
+								break;
+							case 1115: strcpy(szdata, v[81].c_str());
+								break;
+							case 1116: strcpy(szdata, v[82].c_str());
+								break;
+							case 1121: strcpy(szdata, v[83].c_str());
+								break;
+							case 1141: strcpy(szdata, v[84].c_str());
+								break;
+							case 1142: strcpy(szdata, v[85].c_str());
+								break;
+							case 1147: strcpy(szdata, v[86].c_str());
+								break;
+							case 1167: strcpy(szdata, v[87].c_str());
+								break;
+							case 1168: strcpy(szdata, v[88].c_str());
+								break;
+							case 1173: strcpy(szdata, v[89].c_str());
+								break;
+							case 1193: strcpy(szdata, v[90].c_str());
+								break;
+							case 1194: strcpy(szdata, v[91].c_str());
+								break;
+							case 1199: strcpy(szdata, v[92].c_str());
+								break;
+							case 1219: strcpy(szdata, v[93].c_str());
+								break;
+							case 1220: strcpy(szdata, v[94].c_str());
+								break;
+							case 1225: strcpy(szdata, v[95].c_str());
+								break;
+							case 1245: strcpy(szdata, v[96].c_str());
+								break;
+							case 1246: strcpy(szdata, v[97].c_str());
+								break;
+							case 1251: strcpy(szdata, v[98].c_str());
+								break;
+							case 1271: strcpy(szdata, v[99].c_str());
+								break;
+							case 1272: strcpy(szdata, v[100].c_str());
+								break;
+							case 1277: strcpy(szdata, v[101].c_str());
+								break;
+							case 1297: strcpy(szdata, v[102].c_str());
+								break;
+							case 1298: strcpy(szdata, v[103].c_str());
+								break;
+							case 1303: strcpy(szdata, v[104].c_str());
+								break;
+							case 1323: strcpy(szdata, v[105].c_str());
+								break;
+							case 1324: strcpy(szdata, v[106].c_str());
+								break;
+							case 1329: strcpy(szdata, v[107].c_str());
+								break;
+							case 1349: strcpy(szdata, v[108].c_str());
+								break;
+							case 1350: strcpy(szdata, v[109].c_str());
+								break;
+							case 1355: strcpy(szdata, v[110].c_str());
+								break;
+							case 1375: strcpy(szdata, v[111].c_str());
+								break;
+							case 1376: strcpy(szdata, v[112].c_str());
+								break;
+							case 1381: strcpy(szdata, v[113].c_str());
+								break;
+							case 1401: strcpy(szdata, v[114].c_str());
+								break;
+							case 1402: strcpy(szdata, v[115].c_str());
+								break;
+							case 1407: strcpy(szdata, v[116].c_str());
+								break;
+							case 1427: strcpy(szdata, v[117].c_str());
+								break;
+							case 1428: strcpy(szdata, v[118].c_str());
+								break;
+							case 1433: strcpy(szdata, v[119].c_str());
+								break;
+							case 1453: strcpy(szdata, v[120].c_str());
+								break;
+							case 1454: strcpy(szdata, v[121].c_str());
+								break;
+							case 1459: strcpy(szdata, v[122].c_str());
+								break;
+							case 1479: strcpy(szdata, v[123].c_str());
+								break;
+							case 1480: strcpy(szdata, v[124].c_str());
+								break;
+							case 1485: strcpy(szdata, v[125].c_str());
+								break;
+							case 1505: strcpy(szdata, v[126].c_str());
+								break;
+							case 1506: strcpy(szdata, v[127].c_str());
+								break;
+							case 1511: strcpy(szdata, v[128].c_str());
+								break;
+							case 1531: strcpy(szdata, v[129].c_str());
+								break;
+							case 1532: strcpy(szdata, v[130].c_str());
+								break;
+							case 1537: strcpy(szdata, v[131].c_str());
+								break;
+							case 1557: strcpy(szdata, v[132].c_str());
+								break;
+							case 1558: strcpy(szdata, v[133].c_str());
+								break;
+							case 1563: strcpy(szdata, v[134].c_str());
+								break;
+							case 1583: strcpy(szdata, v[135].c_str());
+								break;
+							case 1584: strcpy(szdata, v[136].c_str());
+								break;
+							case 1589: strcpy(szdata, v[137].c_str());
+								break;
+							case 1594: strcpy(szdata, v[138].c_str());
+								break;
+							case 1599: strcpy(szdata, v[139].c_str());
+								break;
+							case 1604: strcpy(szdata, v[140].c_str());
+								break;
+							case 1609: strcpy(szdata, v[141].c_str());
+								break;
+							case 1614: strcpy(szdata, v[142].c_str());
+								break;
+							case 1619: strcpy(szdata, v[143].c_str());
+								break;
+							case 1624: strcpy(szdata, v[144].c_str());
+								break;
+							case 1629: strcpy(szdata, v[145].c_str());
+								break;
+							case 1634: strcpy(szdata, v[146].c_str());
+								break;
+
+							default:
+								break;
+							}
+						}
+					}
+					//FreeLibrary(hdllInst);
+					return stauts_df03ee;
+				}
+			}
+		}
+	
+}
+int _stdcall iW_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
+{
+	if (HDDTYPE == 1)
+	{
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			w_df03ee df03ee = (w_df03ee)GetProcAddress(HIns_CAP, "iW_DF03EEInfo");
+			if (df03ee == NULL)
+			{
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				int stauts_df03ee = df03ee(hdev, record, szdata, npos, nlen, nstyle);
+				//FreeLibrary(hdllInst);
+				return stauts_df03ee;
+			}
+		}
+	}
+	if (HDDTYPE == 2)
+	{
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			//readEDinfo readED = (readEDinfo)GetProcAddress(hdllInst, "ReadEDFileInfo");
+			writeEEinfo writeEE = (writeEEinfo)GetProcAddress(HIns_WQ, "WriteEEFileInfo");
+			//if ((readED == NULL)||(writeED==NULL))
+			if (writeEE == NULL)
+			{
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				char errMsg[1024] = { 0 };
+				int ret = writeEE(szdata, errMsg);
+				return ret;
+			}
 		}
 	}
 }
 int _stdcall iR_DF03EDInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (HDDTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		r_df03ed df03ed = (r_df03ed)GetProcAddress(hdllInst, "iR_DF03EDInfo");
-		if (df03ed == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			return -1801;
 		}
 		else
 		{
-			int stauts_df03ed = df03ed(hdev, record, szdata, npos, nlen, nstyle);
-			FreeLibrary(hdllInst);
-			return stauts_df03ed;
+			r_df03ed df03ed = (r_df03ed)GetProcAddress(HIns_CAP, "iR_DF03EDInfo");
+			if (df03ed == NULL)
+			{
+				W_ReadCardLog("DF03ED");
+
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				int stauts_df03ed = df03ed(hdev, record, szdata, npos, nlen, nstyle);
+				//FreeLibrary(hdllInst);
+				return stauts_df03ed;
+			}
+		}
+	}
+	if (HDDTYPE == 2)
+	{
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			readEDinfo df03ed = (readEDinfo)GetProcAddress(HIns_WQ, "ReadEDFileInfo");
+			if (df03ed == NULL)
+			{
+				W_ReadCardLog("DF03ED");
+
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				char outMsg[65535] = { 0 };
+				char errMsg[1024] = { 0 };
+				int stauts_df03ed = df03ed(record, outMsg, errMsg);
+				if (stauts_df03ed == 0)
+				{
+					if ((npos == 0) && (nlen == 3013))//read all of info
+					{
+						strcpy(szdata, outMsg);
+					}
+					else
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						switch (npos)
+						{
+						case 0:strcpy(szdata, v[0].c_str());
+							break;
+						case 70: strcpy(szdata, v[1].c_str());
+							break;
+						case 80: strcpy(szdata, v[2].c_str());
+							break;
+						case 87: strcpy(szdata, v[3].c_str());
+							break;
+						case 105: strcpy(szdata, v[4].c_str());
+							break;
+						case 155: strcpy(szdata, v[5].c_str());
+							break;
+						case 156: strcpy(szdata, v[6].c_str());
+							break;
+						case 206: strcpy(szdata, v[7].c_str());
+							break;
+						case 211: strcpy(szdata, v[8].c_str());
+							break;
+						case 215: strcpy(szdata, v[9].c_str());
+							break;
+						case 265: strcpy(szdata, v[10].c_str());
+							break;
+						case 272: strcpy(szdata, v[11].c_str());
+							break;
+						case 279: strcpy(szdata, v[12].c_str());
+							break;
+						case 281: strcpy(szdata, v[13].c_str());
+							break;
+						case 331: strcpy(szdata, v[14].c_str());
+							break;
+						case 336: strcpy(szdata, v[15].c_str());
+							break;
+						case 340: strcpy(szdata, v[16].c_str());
+							break;
+						case 390: strcpy(szdata, v[17].c_str());
+							break;
+						case 397: strcpy(szdata, v[18].c_str());
+							break;
+						case 404: strcpy(szdata, v[19].c_str());
+							break;
+						case 406: strcpy(szdata, v[20].c_str());
+							break;
+						case 456: strcpy(szdata, v[21].c_str());
+							break;
+						case 461: strcpy(szdata, v[22].c_str());
+							break;
+						case 465: strcpy(szdata, v[23].c_str());
+							break;
+						case 515: strcpy(szdata, v[24].c_str());
+							break;
+						case 522: strcpy(szdata, v[25].c_str());
+							break;
+						case 529: strcpy(szdata, v[26].c_str());
+							break;
+						case 531: strcpy(szdata, v[27].c_str());
+							break;
+						case 581: strcpy(szdata, v[28].c_str());
+							break;
+						case 586: strcpy(szdata, v[29].c_str());
+							break;
+						case 590: strcpy(szdata, v[30].c_str());
+							break;
+						case 640: strcpy(szdata, v[31].c_str());
+							break;
+						case 647: strcpy(szdata, v[32].c_str());
+							break;
+						case 654: strcpy(szdata, v[33].c_str());
+							break;
+						case 656: strcpy(szdata, v[34].c_str());
+							break;
+						case 706: strcpy(szdata, v[35].c_str());
+							break;
+						case 711: strcpy(szdata, v[36].c_str());
+							break;
+						case 715: strcpy(szdata, v[37].c_str());
+							break;
+						case 765: strcpy(szdata, v[38].c_str());
+							break;
+						case 772: strcpy(szdata, v[39].c_str());
+							break;
+						case 779: strcpy(szdata, v[40].c_str());
+							break;
+						case 781: strcpy(szdata, v[41].c_str());
+							break;
+						case 861: strcpy(szdata, v[42].c_str());
+							break;
+						case 862: strcpy(szdata, v[43].c_str());
+							break;
+						case 867: strcpy(szdata, v[44].c_str());
+							break;
+						case 887: strcpy(szdata, v[45].c_str());
+							break;
+						case 907: strcpy(szdata, v[46].c_str());
+							break;
+						case 987: strcpy(szdata, v[47].c_str());
+							break;
+						case 988: strcpy(szdata, v[48].c_str());
+							break;
+						case 993: strcpy(szdata, v[49].c_str());
+							break;
+						case 1013: strcpy(szdata, v[50].c_str());
+							break;
+						case 1033: strcpy(szdata, v[51].c_str());
+							break;
+						case 1113: strcpy(szdata, v[52].c_str());
+							break;
+						case 1114: strcpy(szdata, v[53].c_str());
+							break;
+						case 1119: strcpy(szdata, v[54].c_str());
+							break;
+						case 1139: strcpy(szdata, v[55].c_str());
+							break;
+						case 1159: strcpy(szdata, v[56].c_str());
+							break;
+						case 1239: strcpy(szdata, v[57].c_str());
+							break;
+						case 1240: strcpy(szdata, v[58].c_str());
+							break;
+						case 1245: strcpy(szdata, v[59].c_str());
+							break;
+						case 1265: strcpy(szdata, v[60].c_str());
+							break;
+						case 1285: strcpy(szdata, v[61].c_str());
+							break;
+						case 1365: strcpy(szdata, v[62].c_str());
+							break;
+						case 1366: strcpy(szdata, v[63].c_str());
+							break;
+						case 1371: strcpy(szdata, v[64].c_str());
+							break;
+						case 1391: strcpy(szdata, v[65].c_str());
+							break;
+						case 1411: strcpy(szdata, v[66].c_str());
+							break;
+						case 1491: strcpy(szdata, v[67].c_str());
+							break;
+						case 1492: strcpy(szdata, v[68].c_str());
+							break;
+						case 1497: strcpy(szdata, v[69].c_str());
+							break;
+						case 1517: strcpy(szdata, v[70].c_str());
+							break;
+						case 1537: strcpy(szdata, v[71].c_str());
+							break;
+						case 1617: strcpy(szdata, v[72].c_str());
+							break;
+						case 1618: strcpy(szdata, v[73].c_str());
+							break;
+						case 1623: strcpy(szdata, v[74].c_str());
+							break;
+						case 1643: strcpy(szdata, v[75].c_str());
+							break;
+						case 1663: strcpy(szdata, v[76].c_str());
+							break;
+						case 1743: strcpy(szdata, v[77].c_str());
+							break;
+						case 1744: strcpy(szdata, v[78].c_str());
+							break;
+						case 1749: strcpy(szdata, v[79].c_str());
+							break;
+						case 1769: strcpy(szdata, v[80].c_str());
+							break;
+						case 1789: strcpy(szdata, v[81].c_str());
+							break;
+						case 1869: strcpy(szdata, v[82].c_str());
+							break;
+						case 1870: strcpy(szdata, v[83].c_str());
+							break;
+						case 1875: strcpy(szdata, v[84].c_str());
+							break;
+						case 1895: strcpy(szdata, v[85].c_str());
+							break;
+						case 1915: strcpy(szdata, v[86].c_str());
+							break;
+						case 1995: strcpy(szdata, v[87].c_str());
+							break;
+						case 1996: strcpy(szdata, v[88].c_str());
+							break;
+						case 2001: strcpy(szdata, v[89].c_str());
+							break;
+						case 2021: strcpy(szdata, v[90].c_str());
+							break;
+						case 2041: strcpy(szdata, v[91].c_str());
+							break;
+						case 2091: strcpy(szdata, v[92].c_str());
+							break;
+						case 2092: strcpy(szdata, v[93].c_str());
+							break;
+						case 2095: strcpy(szdata, v[94].c_str());
+							break;
+						case 2115: strcpy(szdata, v[95].c_str());
+							break;
+						case 2121: strcpy(szdata, v[96].c_str());
+							break;
+						case 2124: strcpy(szdata, v[97].c_str());
+							break;
+						case 2130: strcpy(szdata, v[98].c_str());
+							break;
+						case 2132: strcpy(szdata, v[99].c_str());
+							break;
+						case 2182: strcpy(szdata, v[100].c_str());
+							break;
+						case 2183: strcpy(szdata, v[101].c_str());
+							break;
+						case 2186: strcpy(szdata, v[102].c_str());
+							break;
+						case 2206: strcpy(szdata, v[103].c_str());
+							break;
+						case 2212: strcpy(szdata, v[104].c_str());
+							break;
+						case 2215: strcpy(szdata, v[105].c_str());
+							break;
+						case 2221: strcpy(szdata, v[106].c_str());
+							break;
+						case 2223: strcpy(szdata, v[107].c_str());
+							break;
+						case 2273: strcpy(szdata, v[108].c_str());
+							break;
+						case 2274: strcpy(szdata, v[109].c_str());
+							break;
+						case 2277: strcpy(szdata, v[110].c_str());
+							break;
+						case 2297: strcpy(szdata, v[111].c_str());
+							break;
+						case 2303: strcpy(szdata, v[112].c_str());
+							break;
+						case 2306: strcpy(szdata, v[113].c_str());
+							break;
+						case 2312: strcpy(szdata, v[114].c_str());
+							break;
+						case 2314: strcpy(szdata, v[115].c_str());
+							break;
+						case 2364: strcpy(szdata, v[116].c_str());
+							break;
+						case 2365: strcpy(szdata, v[117].c_str());
+							break;
+						case 2368: strcpy(szdata, v[118].c_str());
+							break;
+						case 2388: strcpy(szdata, v[119].c_str());
+							break;
+						case 2394: strcpy(szdata, v[120].c_str());
+							break;
+						case 2397: strcpy(szdata, v[121].c_str());
+							break;
+						case 2403: strcpy(szdata, v[122].c_str());
+							break;
+						case 2405: strcpy(szdata, v[123].c_str());
+							break;
+						case 2455: strcpy(szdata, v[124].c_str());
+							break;
+						case 2456: strcpy(szdata, v[125].c_str());
+							break;
+						case 2459: strcpy(szdata, v[126].c_str());
+							break;
+						case 2479: strcpy(szdata, v[127].c_str());
+							break;
+						case 2485: strcpy(szdata, v[128].c_str());
+							break;
+						case 2488: strcpy(szdata, v[129].c_str());
+							break;
+						case 2494: strcpy(szdata, v[130].c_str());
+							break;
+						case 2496: strcpy(szdata, v[131].c_str());
+							break;
+						case 2576: strcpy(szdata, v[132].c_str());
+							break;
+						case 2581: strcpy(szdata, v[133].c_str());
+							break;
+						case 2585: strcpy(szdata, v[134].c_str());
+							break;
+						case 2665: strcpy(szdata, v[135].c_str());
+							break;
+						case 2670: strcpy(szdata, v[136].c_str());
+							break;
+						case 2674: strcpy(szdata, v[137].c_str());
+							break;
+						case 2754: strcpy(szdata, v[138].c_str());
+							break;
+						case 2759: strcpy(szdata, v[139].c_str());
+							break;
+						case 2763: strcpy(szdata, v[140].c_str());
+							break;
+						case 2783: strcpy(szdata, v[141].c_str());
+							break;
+						case 2784: strcpy(szdata, v[142].c_str());
+							break;
+						case 2788: strcpy(szdata, v[143].c_str());
+							break;
+						case 2808: strcpy(szdata, v[144].c_str());
+							break;
+						case 2809: strcpy(szdata, v[145].c_str());
+							break;
+						case 2813: strcpy(szdata, v[146].c_str());
+							break;
+						case 2833: strcpy(szdata, v[147].c_str());
+							break;
+						case 2834: strcpy(szdata, v[148].c_str());
+							break;
+						case 2838: strcpy(szdata, v[149].c_str());
+							break;
+						case 2858: strcpy(szdata, v[150].c_str());
+							break;
+						case 2859: strcpy(szdata, v[151].c_str());
+							break;
+						case 2863: strcpy(szdata, v[152].c_str());
+							break;
+						case 2883: strcpy(szdata, v[153].c_str());
+							break;
+						case 2884: strcpy(szdata, v[154].c_str());
+							break;
+						case 2888: strcpy(szdata, v[155].c_str());
+							break;
+						case 2908: strcpy(szdata, v[156].c_str());
+							break;
+						case 2909: strcpy(szdata, v[157].c_str());
+							break;
+						case 2913: strcpy(szdata, v[158].c_str());
+							break;
+						case 2933: strcpy(szdata, v[159].c_str());
+							break;
+						case 2934: strcpy(szdata, v[160].c_str());
+							break;
+						case 2938: strcpy(szdata, v[161].c_str());
+							break;
+						case 2958: strcpy(szdata, v[162].c_str());
+							break;
+						case 2959: strcpy(szdata, v[163].c_str());
+							break;
+						case 2963: strcpy(szdata, v[164].c_str());
+							break;
+						case 2983: strcpy(szdata, v[165].c_str());
+							break;
+						case 2984: strcpy(szdata, v[166].c_str());
+							break;
+						case 2988: strcpy(szdata, v[167].c_str());
+							break;
+						case 3008: strcpy(szdata, v[168].c_str());
+							break;
+						case 3009: strcpy(szdata, v[169].c_str());
+							break;
+						default:
+							break;
+						}
+					}
+				}
+				//FreeLibrary(hdllInst);
+				return stauts_df03ed;
+			}
 		}
 	}
 }
 int _stdcall iW_DF03EDInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
-	//W_ReadCardLog("EVENT 调用写门诊信息接口iW_DF03EDInfo开始");
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
+	if (HDDTYPE == 1)
 	{
-		return -1801;
-	}
-	else
-	{
-		w_df03ed df03ed = (w_df03ed)GetProcAddress(hdllInst, "iW_DF03EDInfo");
-		if (df03ed == NULL)
+		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
+		if (HIns_CAP == NULL)
 		{
-			FreeLibrary(hdllInst);
-			return -1701;
+			return -1801;
 		}
 		else
 		{
-			char _log[128] = { 0 };
-			int stauts_df03ed = df03ed(hdev, record, szdata, npos, nlen, nstyle);
-			if (0 == stauts_df03ed)
+			w_df03ed df03ed = (w_df03ed)GetProcAddress(HIns_CAP, "iW_DF03EDInfo");
+			if (df03ed == NULL)
 			{
-				sprintf(_log, "INFO record:%d,npos:%d,nlen:%d,写入成功", record, npos, nlen);
+				//FreeLibrary(hdllInst);
+				return -1701;
 			}
 			else
 			{
-				sprintf(_log, "ERROR record:%d,npos:%d,nlen:%d,写入失败，返回%d", record, npos, nlen, stauts_df03ed);
+				int stauts_df03ed = df03ed(hdev, record, szdata, npos, nlen, nstyle);
+				//FreeLibrary(hdllInst);
+				return stauts_df03ed;
 			}
-			FreeLibrary(hdllInst);
-			return stauts_df03ed;
+		}
+	}
+	if (HDDTYPE == 2)
+	{
+		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+		if (HIns_WQ == NULL)
+		{
+			return -1801;
+		}
+		else
+		{
+			//readEDinfo readED = (readEDinfo)GetProcAddress(hdllInst, "ReadEDFileInfo");
+			writeEDinfo writeED = (writeEDinfo)GetProcAddress(HIns_WQ, "WriteEDFileInfo");
+			//if ((readED == NULL)||(writeED==NULL))
+			if (writeED == NULL)
+			{
+				//FreeLibrary(hdllInst);
+				return -1701;
+			}
+			else
+			{
+				//char outMsg[65535] = { 0 };
+				char errMsg[1024] = { 0 };
+				int ret = writeED(szdata, errMsg);
+				return ret;
+			}
 		}
 	}
 }
 int _stdcall SM3Digest(HANDLE hdev, BYTE* pbdata, int len, BYTE* pbhash, BYTE* pbhashlen)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		sm3 _sm3 = (sm3)GetProcAddress(hdllInst, "SM3Digest");
-		if (_sm3 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_sm3 = _sm3(hdev, pbdata, len, pbhash, pbhashlen);
-			FreeLibrary(hdllInst);
-			return stauts_sm3;
-		}
-	}
+	return 0;
 }
 int _stdcall VerifyPin(HANDLE hdev, char* szpin, BYTE* pwdretry)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		verifypin pin = (verifypin)GetProcAddress(hdllInst, "VerifyPin");
-		if (pin == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_pin = pin(hdev, szpin, pwdretry);
-			FreeLibrary(hdllInst);
-			return stauts_pin;
-		}
-	}
+	return 0;
+
 }
 int _stdcall SM2SignHash(HANDLE hdev, BYTE* pbdata, int len, BYTE* pbhash, BYTE* pbhashlen)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		sm2 _sm2 = (sm2)GetProcAddress(hdllInst, "SM2SignHash");
-		if (_sm2 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int stauts_sm2 = _sm2(hdev, pbdata, len, pbhash, pbhashlen);
-			FreeLibrary(hdllInst);
-			return stauts_sm2;
-		}
-	}
+	return 0;
 }
 int _stdcall IReader_GetDeviceCSN(HANDLE hdev, char* info)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		getcsn get_csn = (getcsn)GetProcAddress(hdllInst, "IReader_GetDeviceCSN");
-		if (get_csn == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int status_csn = get_csn(hdev, info);
-			FreeLibrary(hdllInst);
-			return status_csn;
-		}
-	}
+	return 0;
 }
 int _stdcall iReader_SAM_Public(HANDLE hdev, char* info)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		getsam get_sam = (getsam)GetProcAddress(hdllInst, "iReader_SAM_Public");
-		if (get_sam == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int status_sam = get_sam(hdev, info);
-			FreeLibrary(hdllInst);
-			return status_sam;
-		}
-	}
+	return 0;
 }
 int _stdcall iReader_GetLastEEIndex(HANDLE hdev)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		get_eeindex eeindex = (get_eeindex)GetProcAddress(hdllInst, "iReader_GetLastEEIndex");
-		if (eeindex == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int status_eeindex = eeindex(hdev);
-			FreeLibrary(hdllInst);
-			return status_eeindex;
-		}
-	}
+	return 0;
 }
 int _stdcall iReader_GetLastEDIndex(HANDLE hdev)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		get_edindex edindex = (get_edindex)GetProcAddress(hdllInst, "iReader_GetLastEDIndex");
-		if (edindex == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int status_edindex = edindex(hdev);
-			FreeLibrary(hdllInst);
-			return status_edindex;
-		}
-	}
+	return 0;
 }
 int _stdcall LockPersonalInfo(HANDLE hdev)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		lockinfo lock_info = (lockinfo)GetProcAddress(hdllInst, "LockPersonalInfo");
-		if (lock_info == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			int status_lock = lock_info(hdev);
-			FreeLibrary(hdllInst);
-			return status_lock;
-		}
-	}
+	return -2;
 }
 /*========================================新增综合读卡、扣费接口=======================================================*/
 
 int _stdcall XDT_GetHisInfo(HANDLE hdev, char* cardno, long* ye, char* xm, char* xb, char* csrq, char* sfzhm)
 {
-	HMODULE hdllInst = LoadLibraryA(CONDLL);
-	if (hdllInst == NULL)
-	{
-		return -1801;
-	}
-	else
-	{
-		//城市通获取客户信息
-		CUSTOMERINFO info;
-		getcardinfo GetCardInfo;
-		GetCardInfo = (getcardinfo)GetProcAddress(hdllInst, "CapGetNBCardInfo");
-		if (GetCardInfo == NULL)
-		{
-			return -1701;
-		}
-		else
-		{
-			//CUSTOMERINFO *ctm_info;
-			long status_getinfo = GetCardInfo(&info);
-			cardno = info.CityCardNo;
-			*ye = info.Ye;
-			//xm = info.Name;
-		}
-		//健康卡上电
-		char _atr[64];
-		poweron jkk_poweron = (poweron)GetProcAddress(hdllInst, "PowerOn");
-		long s_pn1 = jkk_poweron(hdev, 1, _atr);
-		long s_pn3 = jkk_poweron(hdev, 3, _atr);
-		//健康卡读卡
-		r_ddf1ef06 ef06 = (r_ddf1ef06)GetProcAddress(hdllInst, "iR_DDF1EF06Info");
-		if (ef06 == NULL)
-		{
-			FreeLibrary(hdllInst);
-			return -1701;
-		}
-		else
-		{
-			char mz[12];
-			int stauts_ef06 = ef06(hdev, xm, xb, mz, csrq, sfzhm);
-			FreeLibrary(hdllInst);
-			return stauts_ef06;
-		}
-	}
+	return -2;
 }
 //以下是精简动态库接口函数后的两个基本函数，读卡和扣费
 //读卡
@@ -3450,16 +4505,6 @@ LPSTR WINAPI GetIPScanner()
 	delete[] LP_PATH;
 	return ipaddr;
 }
-//读取扫码枪串口号
-short WINAPI GetSERIALPORT()
-{
-	LPSTR LP_PATH = new char[MAX_PATH];
-	strcpy(LP_PATH, "./ChgCity.ini");
-	short port;
-	port = GetPrivateProfileIntA("SCNNER", "SERIALPORT", -1, LP_PATH);
-	delete[] LP_PATH;
-	return port;
-}
 //读取扫码枪socket 端口
 short WINAPI GetSCANNERPORT()
 {
@@ -3470,112 +4515,439 @@ short WINAPI GetSCANNERPORT()
 	delete[] LP_PATH;
 	return port;
 }
-long WINAPI GetComInputInfo(LPSTR info)
-{
-	CSerial cs;
-	short sPort = 0;
 
-	short serial_port = GetSERIALPORT();
-	//当配置文件SERIALPORT为0或者没有此参数，自动识别串口号（仅限端口号小于10）
-	if ((serial_port == 0) || (serial_port == -1))
-	{
-		for (int i = 1; i < 10; i++)
-		{
-			bool isOpen = cs.Open(i);
-			if (isOpen)
-			{
-				sPort = i;
-				cs.Close();
-			}
-		}
-	}
-	else
-	{
-		sPort = serial_port;
-	}
-	bool bs = cs.Open(sPort);
-	char rev[1024] = { 0 };
-	DWORD T = 0;
-	DWORD TOTAL = 20000;
-	long ret = 0;
-	while (T < TOTAL)
-	{
-		char *p = strchr(rev, '\r');
-		if (p)
-		{
-			ret = 0;
-			break;
-		}
-		else
-		{
-			Sleep(500);
-			cs.ReadData(rev, 1024);
-			T += 500;
-			ret = -1;
-		}
-
-	}
-	cs.Close();
-	string str_input(rev);
-	int len_r = str_input.find_first_of("\r", 0);
-	string str_finnal = str_input.substr(0, len_r);
-	strcpy(info, str_finnal.c_str());
-	return ret;
-}
 LPSTR WINAPI GetComInputInfo_Temp()
 {
-	CSerial cs;
-	short sPort = 0;
-
-	short serial_port = GetSERIALPORT();
-	if ((serial_port == 0) || (serial_port == -1))
+	/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+	if (HIns_WQ == NULL)
 	{
-		//自动识别串口号
-		for (int i = 1; i < 10; i++)
-		{
-			bool isOpen = cs.Open(i);
-			if (isOpen)
-			{
-				sPort = i;
-				cs.Close();
-			}
-		}
+		return NULL;
 	}
 	else
 	{
-		sPort = serial_port;
-	}
-	bool bs = cs.Open(sPort);
-	char rev[1024] = { 0 };
-	DWORD T = 0;
-	DWORD TOTAL = 20000;
-	long ret = 0;
-	while (T < TOTAL)
-	{
-		char *p = strchr(rev, '\r');
-		if (p)
+		sendscancmd scan = (sendscancmd)GetProcAddress(HIns_WQ, "SendScanCmd");
+		char outmsg[1024] = { 0 };
+		char errmsg[1024] = { 0 };
+		int ret = scan(outmsg, errmsg);
+		if (ret == 0)
 		{
-			ret = 0;
-			break;
+			return outmsg;
 		}
 		else
 		{
-			Sleep(500);
-			cs.ReadData(rev, 1024);
-			T += 500;
-			ret = -1;
+			return NULL;
 		}
-
 	}
-	cs.Close();
-	string str_input(rev);
-	int len_r = str_input.find_first_of("\r", 0);
-	string str_finnal = str_input.substr(0, len_r);
-	/*char info[1024] = { 0 };
-	strcpy(info, str_finnal.c_str());*/
-	return (char*)str_finnal.data();
 }
 int WINAPI test1(int a, int b)
 {
 	return a + b;
+}
+int __stdcall GetPersionalInfo(int type, char* msgJson)
+{
+	JudgeHDDType();
+
+	if (type == 1)
+	{
+		Json::Value root;
+		Json::FastWriter fw;
+
+		char outMsg[1024] = { 0 };
+		if (HDDTYPE == 1)
+		{
+			HANDLE hdev = OpenDevice(0);
+
+			if (hdev != (HANDLE)0)
+			{
+				return -1;
+			}
+			else
+			{
+				char _atr[64] = { 0 };
+				Sleep(T);
+
+				long pw1_st = PowerOn(hdev, 1, _atr);
+				Sleep(T);
+				long pw3_st = PowerOn(hdev, 3, _atr);
+				if ((pw1_st != 0) || (pw3_st != 0))
+				{
+					return -2;
+				}
+				else
+				{
+					char _sfzh[18 + 1] = { 0 };
+					char _xm[30 + 1] = { 0 };
+					char _xb[2 + 1] = { 0 };
+					char _mz[2 + 1] = { 0 };
+					char _csrq[8 + 1] = { 0 };
+					Sleep(T);
+
+					int ret = iR_DDF1EF06Info(hdev, _xm, _xb, _mz, _csrq, _sfzh);
+					if ((ret == 0) && (strlen(_xm) > 0) && (strlen(_sfzh) > 0))
+					{
+						root["flag"] = 1;
+					}
+					else
+					{
+						root["flag"] = 0;
+					}
+					root["content"]["papersNum"] = _sfzh;
+					root["content"]["userName"] = _xm;
+					Sleep(T);
+					char _kyxq[100] = { 0 };
+					char _tel1[20] = { 0 };
+					char _tel2[20] = { 0 };
+					char _zffs1[20] = { 0 };
+					char _zffs2[20] = { 0 };
+					char _zffs3[20] = { 0 };
+					iR_DDF1EF08Info(hdev, _kyxq, _tel1, _tel2, _zffs1, _zffs2, _zffs3);
+					if (strlen(_tel1) > 0)
+					{
+						root["content"]["telephone"] = _tel1;
+					}
+					else
+					{
+						root["content"]["telephone"] = _tel2;
+					}
+					Sleep(T);
+					char _dzlb1[20] = { 0 };
+					char _dz1[100] = { 0 };
+					char _dzlb2[20] = { 0 };
+					char _dz2[100] = { 0 };
+					iR_DF01EF05Info(hdev, _dzlb1, _dz1, _dzlb2, _dz2);
+					if (strlen(_dz1) > 0)
+					{
+						root["content"]["patientAddr"] = _dz1;
+					}
+					else
+					{
+						root["content"]["patientAddr"] = _dz2;
+					}
+					string strMsg = fw.write(root);
+					strcpy(msgJson, strMsg.c_str());
+				}
+				return 0;
+			}
+		}
+		if (HDDTYPE == 2)
+		{
+
+
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return -1801;
+			}
+			else
+			{
+				readcardinfo ef06 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (ef06 == NULL)
+				{
+					//FreeLibrary(hdllInst);
+					return -1701;
+				}
+				else
+				{
+					char errMsg[1024] = { 0 };
+					int ret = ef06(outMsg, errMsg);
+					if (ret == 0) //读居民健康卡成功
+					{
+						v.clear();
+						string strOutMsg(outMsg);
+						my_split(strOutMsg, c_spliter, v);
+						root["content"]["userName"] = v[0].c_str();
+						root["content"]["papersNum"] = v[4].c_str();
+						root["content"]["telephone"] = v[6].c_str();
+						root["content"]["patientAddr"] = v[12].c_str();
+						root["content"]["permanentResiAddr"] = v[14].c_str();
+						root["desc"] = "数据查询成功";
+						root["flag"] = 1;
+					}
+					else
+					{
+						root["content"]["userName"] = "";
+						root["content"]["papersNum"] = "";
+						root["content"]["telephone"] = "";
+						root["content"]["patientAddr"] = "";
+						root["content"]["permanentResiAddr"] = "";
+						root["desc"] = "数据查询失败";
+						root["flag"] = 0;
+					}
+					string strMsg = fw.write(root);
+					strcpy(msgJson, strMsg.c_str());
+				}
+			}
+		}
+	}
+	if (type == 2)
+	{
+		JudgeHDDType();
+		char qrcode[1024] = { 0 };
+		int ret = GetComInputInfo(qrcode);
+		string content_kh(qrcode);
+		string searchtype = "search";
+		char req_resv[2048];
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		//定义并初始化Json对象
+		Json::Value sendvalue;
+		//string content(_info);
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["content"] = content_kh;
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = searchtype;
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[2048] = { 0 };
+		strcpy(_send_buff, sendJson.c_str());
+		char logtmp[2048];
+		sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+		W_ReadCardLog(logtmp);
+		//发送请求
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
+		{
+			char _rev_temp[2048] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
+			{
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				W_ReadCardLog(json_rel.c_str());
+				strcpy(msgJson, json_rel.c_str());
+				return 0;
+			}
+			else
+			{
+				return -1;
+			}
+		}
+		else
+		{
+			return -2;
+		}
+	}
+}
+string UTF8ToGB(const char* str)
+{
+	string result;
+	WCHAR *strSrc;
+	LPSTR szRes;
+
+	int i = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
+	strSrc = new WCHAR[i + 1];
+	MultiByteToWideChar(CP_UTF8, 0, str, -1, strSrc, i);
+
+	i = WideCharToMultiByte(CP_ACP, 0, strSrc, -1, NULL, 0, NULL, NULL);
+	szRes = new CHAR[i + 1];
+	WideCharToMultiByte(CP_ACP, 0, strSrc, -1, szRes, i, NULL, NULL);
+
+	result = szRes;
+	delete[]strSrc;
+	delete[]szRes;
+	return result;
+}
+LPSTR WINAPI GetPersionalInfo_temp(int type)
+{
+	JudgeHDDType();
+
+	if (type == 1)
+	{
+		Json::Value root;
+		Json::FastWriter fw;
+
+		char outMsg[1024] = { 0 };
+		if (HDDTYPE == 1)
+		{
+			HANDLE hdev = OpenDevice(0);
+
+			if (hdev != (HANDLE)0)
+			{
+				return NULL;
+			}
+			else
+			{
+				char _atr[64] = { 0 };
+				Sleep(T);
+
+				long pw1_st = PowerOn(hdev, 1, _atr);
+				Sleep(T);
+				long pw3_st = PowerOn(hdev, 3, _atr);
+				if ((pw1_st != 0) || (pw3_st != 0))
+				{
+					return NULL;
+				}
+				else
+				{
+					char _sfzh[18 + 1] = { 0 };
+					char _xm[30 + 1] = { 0 };
+					char _xb[2 + 1] = { 0 };
+					char _mz[2 + 1] = { 0 };
+					char _csrq[8 + 1] = { 0 };
+					Sleep(T);
+
+					int ret = iR_DDF1EF06Info(hdev, _xm, _xb, _mz, _csrq, _sfzh);
+					if ((ret == 0) && (strlen(_xm) > 0) && (strlen(_sfzh) > 0))
+					{
+						root["flag"] = 1;
+					}
+					else
+					{
+						root["flag"] = 0;
+					}
+					root["content"]["papersNum"] = _sfzh;
+					root["content"]["userName"] = _xm;
+					Sleep(T);
+					char _kyxq[100] = { 0 };
+					char _tel1[20] = { 0 };
+					char _tel2[20] = { 0 };
+					char _zffs1[20] = { 0 };
+					char _zffs2[20] = { 0 };
+					char _zffs3[20] = { 0 };
+					iR_DDF1EF08Info(hdev, _kyxq, _tel1, _tel2, _zffs1, _zffs2, _zffs3);
+					if (strlen(_tel1) > 0)
+					{
+						root["content"]["telephone"] = _tel1;
+					}
+					else
+					{
+						root["content"]["telephone"] = _tel2;
+					}
+					Sleep(T);
+					char _dzlb1[20] = { 0 };
+					char _dz1[100] = { 0 };
+					char _dzlb2[20] = { 0 };
+					char _dz2[100] = { 0 };
+					iR_DF01EF05Info(hdev, _dzlb1, _dz1, _dzlb2, _dz2);
+					if (strlen(_dz1) > 0)
+					{
+						root["content"]["patientAddr"] = _dz1;
+					}
+					else
+					{
+						root["content"]["patientAddr"] = _dz2;
+					}
+					string strMsg = fw.write(root);
+					char msgJson[1024] = { 0 };
+					strcpy(msgJson, strMsg.c_str());
+					return msgJson;
+				}
+			}
+		}
+		if (HDDTYPE == 2)
+		{
+
+
+			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
+			if (HIns_WQ == NULL)
+			{
+				return NULL;
+			}
+			else
+			{
+				readcardinfo ef06 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadPeopleInfo");
+				if (ef06 == NULL)
+				{
+					//FreeLibrary(hdllInst);
+					return NULL;
+				}
+				else
+				{
+					char errMsg[1024] = { 0 };
+					int ret = ef06(outMsg, errMsg);
+					//if (ret == 0) //读居民健康卡成功
+					//{
+					//	v.clear();
+					//	string strOutMsg(outMsg);
+					//	my_split(strOutMsg, c_spliter, v);
+					//	root["content"]["userName"] = v[0].c_str();
+					//	root["content"]["papersNum"] = v[4].c_str();
+					//	root["content"]["telephone"] = v[6].c_str();
+					//	root["content"]["patientAddr"] = v[12].c_str();
+					//	root["content"]["permanentResiAddr"] = v[14].c_str();
+					//	root["desc"] = "数据查询成功";
+					//	root["flag"] = 1;
+					//}
+					//else
+					//{
+					//	root["content"]["userName"] = "";
+					//	root["content"]["papersNum"] = "";
+					//	root["content"]["telephone"] = "";
+					//	root["content"]["patientAddr"] = "";
+					//	root["content"]["permanentResiAddr"] = "";
+					//	root["desc"] = "数据查询失败";
+					//	root["flag"] = 0;
+					//}
+					//char msgJson[1024] = { 0 };
+					//string strMsg = fw.write(root);
+					//strcpy(msgJson, strMsg.c_str());
+					//return msgJson;
+					W_ReadCardLog(outMsg);
+					
+					return outMsg;
+				}
+			}
+		}
+	}
+	if (type == 2)
+	{
+		JudgeHDDType();
+		char qrcode[1024] = { 0 };
+		int ret = GetComInputInfo(qrcode);
+		string content_kh(qrcode);
+		string searchtype = "search";
+		char req_resv[2048];
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		//定义并初始化Json对象
+		Json::Value sendvalue;
+		//string content(_info);
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["content"] = content_kh;
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = searchtype;
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[2048] = { 0 };
+		strcpy(_send_buff, sendJson.c_str());
+		char logtmp[2048];
+		sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+		W_ReadCardLog(logtmp);
+		//发送请求
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
+		{
+			char _rev_temp[2048] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
+			{
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				char msgJson[1024] = { 0 };
+				W_ReadCardLog(json_rel.c_str());
+				strcpy(msgJson, json_rel.c_str());
+				return msgJson;
+			}
+			else
+			{
+				return NULL;
+			}
+		}
+		else
+		{
+			return NULL;
+		}
+	}
 }
