@@ -38,6 +38,8 @@ int RTYPE = -1;	//当前读卡类型，实体卡为1，电子健康卡为2
 const int T = 200;
 LPCSTR CONDLL = "HealthyCarder.dll";
 LPCSTR CAPDLL = "Cap_RW.dll";
+LPCSTR DCHDLL = "DCHealthyCarder.dll";
+LPCSTR DCDLL = "dcrf32.dll";
 //LPSTR iniFileName = ".\\ChgCity.ini";
 char iniFileName[20] = ".\\ChgCity.ini";
 LPSTR RIZHI = "debug.log";
@@ -45,8 +47,12 @@ Json::Value js_vl;
 char ALLIDCARD[20] = { 0 };
 HMODULE HIns_CAP = LoadLibraryA(CAPDLL);
 HMODULE HIns_WQ = LoadLibraryA(CONDLL);
+HMODULE HIns_DC_HEL = LoadLibraryA(DCHDLL);
+HMODULE HIns_DC = LoadLibraryA(DCDLL);
 #define COMMONERROR 100;
 #define OUTTIME 102;
+
+#pragma region 定义一卡通接口
 //int seq = 1;
 /*
 定义城市通接口函数
@@ -217,7 +223,35 @@ typedef int(WINAPI *r_df03ed)(HANDLE, int, char*, int, int, int);
 typedef int(WINAPI *w_df03ed)(HANDLE, int, char*, int, int, int);
 //读个人信息综合接口
 typedef int(WINAPI *r_pinfo)(int, char*, char*);
-/*========================================MD5加密实现=======================================================*/
+
+#pragma endregion
+
+#pragma region 定义德卡接口
+
+typedef HANDLE(WINAPI *dcinit)(int, int);
+//开始扫码
+typedef int(WINAPI *dc_startscan)(HANDLE, unsigned char);
+//获取扫码数据
+typedef int(WINAPI *dc_getscandata)(HANDLE, int*, unsigned char*);
+//结束扫码
+typedef int(WINAPI *dc_sacnexit)(HANDLE);
+//关闭读卡器端口
+typedef int(WINAPI *dc_exit)(HANDLE);
+//德卡居民健康卡
+//打开设备
+typedef HANDLE(WINAPI *dc_open)(int);
+//关闭设备
+typedef int(WINAPI *dc_close)(HANDLE);
+//上电复位
+typedef int(WINAPI *dc_poweron)(HANDLE, int, char*);
+//读卡基本信息
+typedef int(WINAPI *dc_ref05)(HANDLE, char*, char*, char*, char*, char*, char*, char*, char*, char*, char*);
+//蜂鸣
+typedef int(WINAPI *dc_beep)(HANDLE, unsigned short);
+#pragma endregion
+#pragma region MD5加密
+
+
 typedef  unsigned  char  *POINTER;
 typedef  unsigned  short  int  UINT2;
 typedef  unsigned  long  int  UINT4;
@@ -424,7 +458,10 @@ void  MD5Digest(char  *pszInput, unsigned  long  nInputSize, char  *pszOutPut)
 	MD5Update(&context, (unsigned  char  *)pszInput, len);
 	MD5Final((unsigned  char  *)pszOutPut, &context);
 }
-/*========================================BASE64转换=======================================================*/
+
+#pragma endregion
+
+#pragma region BASE64转换
 
 static const std::string base64_chars =
 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -472,7 +509,9 @@ std::string base64_encode(char* bytes_to_encode, unsigned int in_len) {
 	return ret;
 
 }
-/*========================================自定义方法=======================================================*/
+#pragma endregion
+#pragma region 自定义方法
+
 vector<string> v;
 char c_spliter = '|';
 void SplitStr(char* input, char* spliter, vector<char*>& output)
@@ -1352,11 +1391,12 @@ void OpFile()
 	remove("temp_unload.txt");
 	//W_ReadCardLog("INFO 删除本目录临时文件");
 }
+///
+/* 此方法容易报出未知故障，暂时注释掉 
 void JudgeHDDType()
 {
 	W_ReadCardLog("EVENT JudgeHDDType START");
 
-	/*HMODULE hdll1 = LoadLibraryA(CAPDLL);*/
 	opCom open_com;
 	open_com = (opCom)GetProcAddress(HIns_CAP, "OpenCom");
 
@@ -1370,7 +1410,6 @@ void JudgeHDDType()
 	}
 	else
 	{
-		/*HMODULE hdll2 = LoadLibraryA(CONDLL);*/
 
 		readcardinfo ef05 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadCardInfo");
 
@@ -1385,25 +1424,11 @@ void JudgeHDDType()
 		{
 			HDDTYPE = 2;
 			W_ReadCardLog("TYPE 2");
-
 			return;
-			/*char outMsg[60535] = { 0 };
-			char errMsg[1024] = { 0 };
-			int stauts_ef05 = ef05(outMsg, errMsg);
-			if (stauts_ef05 == 0)
-			{
-				HDDTYPE = 2;
-				W_ReadCardLog("TYPE 2");
-				return;
-			}
-			else
-			{
-				W_ReadCardLog(errMsg);
-				HDDTYPE = -1;
-			}*/
 		}
 	}
 }
+*/
 //读取扫码枪串口号
 short WINAPI GetSERIALPORT()
 {
@@ -1411,13 +1436,53 @@ short WINAPI GetSERIALPORT()
 	port = GetPrivateProfileIntA("SCNNER", "SERIALPORT", -1, iniFileName);
 	return port;
 }
+int DC_SCAN(char* scandata)
+{
+	//HMODULE HINS_DC = LoadLibraryA("dcrf32.dll");
+	char log[100];
+
+	dcinit init = (dcinit)GetProcAddress(HIns_DC, "dc_init");
+	HANDLE dev = init(100, 9600);
+	sprintf(log, "设备句柄：%ld", (long)dev);
+	W_ReadCardLog(log);
+	if ((long)dev>0)
+	{
+		W_ReadCardLog("DC init success");
+	}
+	dc_startscan sscan = (dc_startscan)GetProcAddress(HIns_DC, "dc_Scan2DBarcodeStart");
+	unsigned char _mode = '0x00';
+	int ret = sscan(dev, _mode);
+	sprintf(log, "start scan status：%d", ret);
+	W_ReadCardLog(log);
+	dc_getscandata getdata = (dc_getscandata)GetProcAddress(HIns_DC, "dc_Scan2DBarcodeGetData");
+	int rlen = 0;
+	unsigned char buffer[512] = { 0 };
+	ret = getdata(dev, &rlen, buffer);
+	dc_sacnexit scanexit = (dc_sacnexit)GetProcAddress(HIns_DC, "dc_Scan2DBarcodeExit");
+	int i = 0;
+	int maxtime = 30;
+	while ((strlen((const char*)buffer) == 0) && (i<maxtime))
+	{
+		i++;
+		Sleep(100);
+		ret = getdata(dev, &rlen, buffer);
+	}
+	strcpy(scandata, (const char*)buffer);
+	sprintf(log, "DC_SCAN获取二维码：%s，状态：%d,scandata:%s", buffer, ret, scandata);
+	W_ReadCardLog(log);
+	ret = scanexit(dev);
+	dc_exit dcexit = (dc_exit)GetProcAddress(HIns_DC, "dc_exit");
+	ret = dcexit(dev);
+	return ret;
+}
 //根据设备类型返回扫码码值
 long WINAPI GetComInputInfo(LPSTR info)
 {
 	W_ReadCardLog("EVENT GetComInputInfo START");
-
-	JudgeHDDType();
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	//JudgeHDDType();
+	if ((HDDTYPE == 0)||(HDDTYPE==3))
 	{
 		CSerial cs;
 		short sPort = 0;
@@ -1475,7 +1540,12 @@ long WINAPI GetComInputInfo(LPSTR info)
 		W_ReadCardLog(log);
 		return ret;
 	}
-	else if (HDDTYPE == 2)
+	if (HDDTYPE==1)
+	{
+		int ret = DC_SCAN(info);
+		return ret;
+	}
+	if (HDDTYPE == 2)
 	{
 		TransScanMode();//改变扫码模式
 		/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
@@ -1505,6 +1575,7 @@ long WINAPI GetComInputInfo(LPSTR info)
 	}
 
 }
+
 //通过读卡或二维码获取个人信息 //实体卡，type=1 //电子卡，type=2
 long GetCusInfoByUnion(long type, char* inputMsg, char* outMsg)
 {
@@ -1530,6 +1601,9 @@ long GetCusInfoByUnion(long type, char* inputMsg, char* outMsg)
 	LPSTR req_ip;
 	req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
 	short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+	char log[100];
+	sprintf(log, "ip：%s,port:%d", req_ip, _port);
+	W_ReadCardLog(log);
 	//定义并初始化Json对象
 	Json::Value sendvalue;
 	//string content(_info);
@@ -1539,6 +1613,7 @@ long GetCusInfoByUnion(long type, char* inputMsg, char* outMsg)
 	sendvalue["organizationCode"] = orgcode;
 	sendvalue["serialNumber"] = serialNo;
 	sendvalue["method"] = searchtype;
+	sendvalue["dataType"] = "010115";
 	string sendJson = sendvalue.toStyledString();
 	char _send_buff[2048] = { 0 };
 	strcpy(_send_buff, sendJson.c_str());
@@ -1547,6 +1622,9 @@ long GetCusInfoByUnion(long type, char* inputMsg, char* outMsg)
 	W_ReadCardLog(logtmp);
 	//发送请求
 	long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+	char log1[1000];
+	sprintf(log1, "POST返回%d,respons:%s", ret_sendpost,req_resv);
+	W_ReadCardLog(log1);
 	if (0 == ret_sendpost)
 	{
 		char _rev_temp[2048] = { 0 };
@@ -1565,16 +1643,103 @@ long GetCusInfoByUnion(long type, char* inputMsg, char* outMsg)
 		}
 		else
 		{
-			return -1;
+			return 103;
 		}
 	}
 	else
 	{
-		return -2;
+		return 404;
 	}
 }
-/*========================================实现城市通接口=======================================================*/
+
+//通过读卡或二维码获取个人信息 //实体卡，type=1 //电子卡，type=2
+long GetCusInfoByUnion_DataType(long type, char* inputMsg,char* datatype, char* outMsg)
+{
+	W_ReadCardLog("EVENT GetCusInfoByUnion START");
+	string content;
+	string searchtype;
+	string str_datatype(datatype);
+	//先确认支付方式
+	if (type == 1)//实体卡
+	{
+		string content_kh(inputMsg);
+		content = content_kh;
+		searchtype = "searchIdCard";
+
+	}
+	if (type == 2)//电子卡
+	{
+		string content_qrcode(inputMsg);
+		content = content_qrcode;
+		searchtype = "search";
+	}
+	//
+	char req_resv[2048];
+	LPSTR req_ip;
+	req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+	short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+	char log[100];
+	sprintf(log, "ip：%s,port:%d", req_ip, _port);
+	W_ReadCardLog(log);
+	//定义并初始化Json对象
+	Json::Value sendvalue;
+	Json::Reader reader;
+	Json::Value dp;
+	reader.parse(datatype, dp);
+
+	//string content(_info);
+	string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+	string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+	sendvalue["content"] = content;
+	sendvalue["organizationCode"] = orgcode;
+	sendvalue["serialNumber"] = serialNo;
+	sendvalue["method"] = searchtype;
+	sendvalue["dataType"]["medSectionCode"] = dp["medSectionCode"];
+	sendvalue["dataType"]["medStepCode"] = dp["medStepCode"];
+
+	string sendJson = sendvalue.toStyledString();
+	char _send_buff[2048] = { 0 };
+	strcpy(_send_buff, sendJson.c_str());
+	char logtmp[2048];
+	sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+	W_ReadCardLog(logtmp);
+	//发送请求
+	long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+	char log1[1000];
+	sprintf(log1, "POST返回%d,respons:%s", ret_sendpost, req_resv);
+	W_ReadCardLog(log1);
+	if (0 == ret_sendpost)
+	{
+		char _rev_temp[2048] = { 0 };
+		TransCharacter(req_resv, _rev_temp);
+		//截取json
+		string str_rev(_rev_temp);
+		string json_rel;
+		int json_bg = str_rev.find_first_of("{", 0);
+		int json_end = str_rev.find_last_of("}");
+		if (json_end > json_bg)
+		{
+			json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+			W_ReadCardLog(json_rel.c_str());
+			strcpy(outMsg, json_rel.c_str());
+			return 0;
+		}
+		else
+		{
+			return 103;
+		}
+	}
+	else
+	{
+		return 404;
+	}
+}
+#pragma endregion
+
+#pragma region 城市通接口
+
 //打开连接
+
 long _stdcall OpenCom()
 {
 	W_ReadCardLog("EVENT OpenCom START");
@@ -1906,7 +2071,7 @@ long WINAPI CapSetNBCardInfo_SLYY(long objNo, long uid, long opFare, LPSTR jyDT,
 long WINAPI CapSetNBCardInfo_Str1(long objNo, long uid, long opFare, LPSTR jyDT, char *psamID, long *psamJyNo, char *tac, int redix)
 {
 	W_ReadCardLog("EVENT CapSetNBCardInfo_Str1 START");
-	JudgeHDDType();
+	// JudgeHDDType();
 	char outmsg[2048] = { 0 };
 	int ret = GetComInputInfo(outmsg);
 	if (ret == 0)
@@ -2189,7 +2354,7 @@ long _stdcall CapSetNBCardInfo_Str_Unload(long objNo, long uid, long opFare, LPS
 long _stdcall CapSetNBCardInfo_Str(long objNo, long uid, long opFare, LPSTR jyDT, __int64 *psamID, long *psamJyNo, char *tac, int redix)
 {
 	W_ReadCardLog("EVENT CapSetNBCardInfo_Str START");
-	JudgeHDDType();
+	// JudgeHDDType();
 	char outmsg[2048] = { 0 };
 	int ret = GetComInputInfo(outmsg);
 	if (ret == 0)
@@ -2356,7 +2521,9 @@ long _stdcall CapSetNBCardInfo(long objNo, long UID, long opFare, LPSTR jyDT, __
 
 }
 
-/*========================================实现居民健康卡接口=======================================================*/
+#pragma endregion
+
+#pragma region 居民健康卡接口
 
 HANDLE _stdcall OpenDevice(int port)
 {
@@ -2372,8 +2539,10 @@ HANDLE _stdcall OpenDevice(int port)
 	{
 		strcpy(iniFileName, testpath.c_str());
 	}
-	JudgeHDDType();
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	// JudgeHDDType();
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hinstance = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -2413,7 +2582,9 @@ int _stdcall CloseDevice(HANDLE hdev)
 }
 int _stdcall PowerOn(HANDLE hdev, int slot, char* atr)
 {
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -2452,7 +2623,9 @@ int _stdcall iR_DDF1EF05Info(HANDLE hdev, char* klb, char* gfbb, char* fkjgmc, c
 	W_ReadCardLog("EVENT iR_DDF1EF05Info START");
 	int ret = -1;
 	char outMsg[1024] = { 0 };
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		r_ddf1ef05 ef05 = (r_ddf1ef05)GetProcAddress(HIns_CAP, "iR_DDF1EF05Info");
@@ -2503,7 +2676,9 @@ int _stdcall iR_DDF1EF06Info(HANDLE hdev, char* xm, char* xb, char* mz, char* cs
 	int ret = -1;
 	RTYPE = -1;
 	char outMsg[1024] = { 0 };
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		//HMODULE hdllInst = LoadLibraryA(CAPDLL);
 		r_ddf1ef06 ef06 = (r_ddf1ef06)GetProcAddress(HIns_CAP, "iR_DDF1EF06Info");
@@ -2774,7 +2949,9 @@ int _stdcall iR_DDF1EF08Info(HANDLE hdev, char* kyxq, char* brdh1, char* brdh2, 
 	W_ReadCardLog("EVENT iR_DDF1EF08Info START");
 	int ret = -1;
 	char outMsg[1024] = { 0 };
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -2839,11 +3016,11 @@ int _stdcall iR_DF01EF05Info(HANDLE hdev, char* dzlb1, char* dz1, char* dzlb2, c
 
 	int ret = -1;
 	char outMsg[1024] = { 0 };
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
 	if (RTYPE == 1)
 	{
-
-
-		if (HDDTYPE == 1)
+		if (HDDTYPE == 3)
 		{
 			//HMODULE hdllInst = LoadLibraryA(CAPDLL);
 			if (HIns_CAP == NULL)
@@ -2947,12 +3124,13 @@ int _stdcall iW_DF01EF05Info(HANDLE hdev, char* dzlb1, char* dz1, char* dzlb2, c
 int _stdcall iR_DF01EF06Info(HANDLE hdev, char* xm1, char* gx1, char* dh1, char* xm2, char* gx2, char* dh2, char* xm3, char* gx3, char* dh3)
 {
 	W_ReadCardLog("EVENT iR_DF01EF06Info START");
-
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
 	if (RTYPE == 1)
 	{
 		int ret = -1;
 		char outMsg[1024] = { 0 };
-		if (HDDTYPE == 1)
+		if (HDDTYPE == 3)
 		{
 			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 			if (HIns_CAP == NULL)
@@ -3041,11 +3219,11 @@ int _stdcall iW_DF01EF06Info(HANDLE hdev, char* xm1, char* gx1, char* dh1, char*
 int _stdcall iR_DF01EF07Info(HANDLE hdev, char* whcd, char* hyzk, char* zy)
 {
 	W_ReadCardLog("EVENT iR_DF01EF07Info START");
-
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
 	if (RTYPE == 1)
 	{
-		W_ReadCardLog("婚姻状态读取，R1");
-		if (HDDTYPE == 1)
+		if (HDDTYPE == 3)
 		{
 			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 			if (HIns_CAP == NULL)
@@ -3115,8 +3293,6 @@ int _stdcall iR_DF01EF07Info(HANDLE hdev, char* whcd, char* hyzk, char* zy)
 	}
 	else
 	{
-		W_ReadCardLog("婚姻状态读取，R2");
-
 		return 0;
 	}
 }
@@ -3127,12 +3303,13 @@ int _stdcall iW_DF01EF07Info(HANDLE hdev, char* whcd, char* hyzk, char* zy)
 int _stdcall iR_DF01EF08Info(HANDLE hdev, char* zjlb, char* zjhm, char* jkdah, char* xnhzh)
 {
 	W_ReadCardLog("EVENT iR_DF01EF08Info START");
-
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
 	if (RTYPE == 1)
 	{
 
 
-		if (HDDTYPE == 1)
+		if (HDDTYPE == 3)
 		{
 			/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 			if (HIns_CAP == NULL)
@@ -3209,10 +3386,11 @@ int _stdcall iW_DF01EF08Info(HANDLE hdev, char* zjlb, char* zjhm, char* jkdah, c
 int _stdcall iR_DF02EF05Info(HANDLE hdev, char* abo, char* rh, char* xc, char* xzb, char* xnxgb, char* dxb, char* nxwl, char* tnb, char* qgy, char* tx, char* qgyz, char* qgqs, char* kzxyz, char* xzqbq, char* qtyxjs)
 {
 	W_ReadCardLog("EVENT iR_DF02EF05Info START");
-
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
 	if (RTYPE == 1)
 	{
-		if (HDDTYPE == 1)
+		if (HDDTYPE == 3)
 		{
 			/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
 			if (HIns_CAP == NULL)
@@ -3298,8 +3476,9 @@ int _stdcall iErase_DF03EF06Info(HANDLE hdev, int record)
 int _stdcall iR_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
 	W_ReadCardLog("EVENT iR_DF03EEInfo START");
-
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -3669,8 +3848,9 @@ int _stdcall iR_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int 
 int _stdcall iW_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
 	W_ReadCardLog("EVENT iW_DF03EEInfo START");
-
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -3722,8 +3902,9 @@ int _stdcall iW_DF03EEInfo(HANDLE hdev, int record, char* szdata, int npos, int 
 int _stdcall iR_DF03EDInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
 	W_ReadCardLog("EVENT iR_DF03EDInfo START");
-
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -4137,8 +4318,9 @@ int _stdcall iR_DF03EDInfo(HANDLE hdev, int record, char* szdata, int npos, int 
 int _stdcall iW_DF03EDInfo(HANDLE hdev, int record, char* szdata, int npos, int nlen, int nstyle)
 {
 	W_ReadCardLog("EVENT iW_DF03EDInfo START");
-
-	if (HDDTYPE == 1)
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	HDDTYPE = atoi(hddtype);
+	if (HDDTYPE == 3)
 	{
 		/*HMODULE hdllInst = LoadLibraryA(CAPDLL);*/
 		if (HIns_CAP == NULL)
@@ -4221,7 +4403,10 @@ int _stdcall LockPersonalInfo(HANDLE hdev)
 {
 	return -2;
 }
-/*========================================新增综合读卡、扣费接口=======================================================*/
+
+#pragma endregion
+
+#pragma region 新增综合读卡接口
 
 int _stdcall XDT_GetHisInfo(HANDLE hdev, char* cardno, long* ye, char* xm, char* xb, char* csrq, char* sfzhm)
 {
@@ -4599,7 +4784,18 @@ short WINAPI GetSCANNERPORT()
 	port = GetPrivateProfileIntA("SCNNER", "PORT", -1, iniFileName);
 	return port;
 }
-
+// 蜂鸣
+short WINAPI DCBEEP(unsigned short msec)
+{
+	HMODULE HINS = LoadLibraryA("dcrf32.dll");
+	dcinit init = (dcinit)GetProcAddress(HINS, "dc_init");
+	HANDLE dev = init(100, 9600);
+	dc_beep beep = (dc_beep)GetProcAddress(HINS, "dc_beep");
+	int ret = beep(dev, 10);
+	dc_exit dcexit = (dc_exit)GetProcAddress(HINS, "dc_exit");
+	ret = dcexit(dev);
+	return ret;
+}
 LPSTR WINAPI GetComInputInfo_Temp()
 {
 	/*HMODULE hdllInst = LoadLibraryA(CONDLL);*/
@@ -4627,10 +4823,10 @@ int WINAPI test1(int a, int b)
 {
 	return a + b;
 }
-int __stdcall GetPersionalInfo(int type, char* msgJson)
+int __stdcall GetPersionalInfo_wq(int type, char* msgJson)
 {
 	W_ReadCardLog("EVENT GetPersionalInfo START");
-	JudgeHDDType();
+	// JudgeHDDType();
 
 	if (type == 1)
 	{
@@ -4920,11 +5116,11 @@ string UTF8ToGB(const char* str)
 	delete[]szRes;
 	return result;
 }
-LPSTR WINAPI GetPersionalInfo_temp(int type)
+LPSTR WINAPI GetPersionalInfo_temp_wq(int type)
 {
 	W_ReadCardLog("EVENT GetPersionalInfo_temp START");
 
-	JudgeHDDType();
+	// JudgeHDDType();
 
 	if (type == 1)
 	{
@@ -4933,153 +5129,73 @@ LPSTR WINAPI GetPersionalInfo_temp(int type)
 		Json::FastWriter fw;
 		int ret = -1;
 		char* outMsg = new char[512];
-		if (HDDTYPE == 1)
+
+
+		//HMODULE hdllInst = LoadLibraryA(CONDLL);
+		if (HIns_WQ == NULL)
 		{
-			HANDLE hdev = OpenDevice(0);
-			if (hdev != (HANDLE)0)
-			{
-				W_ReadCardLog("ERROR	GetPersionalInfo_temp	E711打开设备失败");
-				return NULL;
-			}
-			else
-			{
-				char _atr[64] = { 0 };
-				Sleep(T);
-
-				long pw1_st = PowerOn(hdev, 1, _atr);
-				Sleep(T);
-				long pw3_st = PowerOn(hdev, 3, _atr);
-				if ((pw1_st != 0) || (pw3_st != 0))
-				{
-					W_ReadCardLog("ERROR	GetPersionalInfo_temp	E711复位失败");
-
-					return NULL;
-				}
-				else
-				{
-					char _sfzh[18 + 1] = { 0 };
-					char _xm[30 + 1] = { 0 };
-					char _xb[2 + 1] = { 0 };
-					char _mz[2 + 1] = { 0 };
-					char _csrq[8 + 1] = { 0 };
-					Sleep(T);
-
-					int ret = iR_DDF1EF06Info(hdev, _xm, _xb, _mz, _csrq, _sfzh);
-					if ((ret == 0) && (strlen(_xm) > 0) && (strlen(_sfzh) > 0))
-					{
-						root["flag"] = 1;
-					}
-					else
-					{
-						root["flag"] = 0;
-					}
-					root["content"]["papersNum"] = _sfzh;
-					root["content"]["userName"] = _xm;
-					Sleep(T);
-					char _kyxq[100] = { 0 };
-					char _tel1[20] = { 0 };
-					char _tel2[20] = { 0 };
-					char _zffs1[20] = { 0 };
-					char _zffs2[20] = { 0 };
-					char _zffs3[20] = { 0 };
-					iR_DDF1EF08Info(hdev, _kyxq, _tel1, _tel2, _zffs1, _zffs2, _zffs3);
-					if (strlen(_tel1) > 0)
-					{
-						root["content"]["telephone"] = _tel1;
-					}
-					else
-					{
-						root["content"]["telephone"] = _tel2;
-					}
-					Sleep(T);
-					char _dzlb1[20] = { 0 };
-					char _dz1[100] = { 0 };
-					char _dzlb2[20] = { 0 };
-					char _dz2[100] = { 0 };
-					iR_DF01EF05Info(hdev, _dzlb1, _dz1, _dzlb2, _dz2);
-					if (strlen(_dz1) > 0)
-					{
-						root["content"]["patientAddr"] = _dz1;
-					}
-					else
-					{
-						root["content"]["patientAddr"] = _dz2;
-					}
-					string strMsg = fw.write(root);
-					char* msgJson = new char[512];
-					//char msgJson[1024] = { 0 };
-					strcpy(msgJson, strMsg.c_str());
-					return msgJson;
-				}
-			}
+			W_ReadCardLog("ERROR	GetPersionalInfo_temp	未能正常加载握奇驱动");
+			return NULL;
 		}
-		if (HDDTYPE == 2)
+		else
 		{
-			//HMODULE hdllInst = LoadLibraryA(CONDLL);
-			if (HIns_WQ == NULL)
+			//握奇W2160读个人信息需要PSAM卡
+			//2019年12月3日14:18:59 通过获取身份证号后查询信息
+			readcardinfo ef05 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadCardInfo");
+			if (ef05 == NULL)
 			{
-				W_ReadCardLog("ERROR	GetPersionalInfo_temp	未能正常加载握奇驱动");
+				//FreeLibrary(hdllInst);
+				W_ReadCardLog("ERROR	GetPersionalInfo_temp	加载ReadCardInfo函数异常");
 				return NULL;
 			}
 			else
 			{
-				//握奇W2160读个人信息需要PSAM卡
-				//2019年12月3日14:18:59 通过获取身份证号后查询信息
-				readcardinfo ef05 = (readcardinfo)GetProcAddress(HIns_WQ, "ReadCardInfo");
-				if (ef05 == NULL)
+				char errMsg[1024] = { 0 };
+				ret = ef05(outMsg, errMsg);
+				/*char log[1024];
+				sprintf(log, "DF1EF06 读卡状态：%d,返回信息：%s，错误信息：%s", ret, outMsg, errMsg);
+				W_ReadCardLog(log);*/
+				if (ret == 0) //读卡成功
 				{
-					//FreeLibrary(hdllInst);
-					W_ReadCardLog("ERROR	GetPersionalInfo_temp	加载ReadCardInfo函数异常");
-					return NULL;
-				}
-				else
-				{
-					char errMsg[1024] = { 0 };
-					ret = ef05(outMsg, errMsg);
-					/*char log[1024];
-					sprintf(log, "DF1EF06 读卡状态：%d,返回信息：%s，错误信息：%s", ret, outMsg, errMsg);
-					W_ReadCardLog(log);*/
-					if (ret == 0) //读卡成功
+					RTYPE = 1;
+					std::vector<std::string> vec;
+					string strOutMsg(outMsg);
+					my_split(strOutMsg, c_spliter, vec);
+					char sfzh[20] = { 0 };
+					strcpy(sfzh, vec[5].c_str());
+					if (strlen(sfzh) > 14)
 					{
-						RTYPE = 1;
-						std::vector<std::string> vec;
-						string strOutMsg(outMsg);
-						my_split(strOutMsg, c_spliter, vec);
-						char sfzh[20] = { 0 };
-						strcpy(sfzh, vec[5].c_str());
-						if (strlen(sfzh) > 14)
+						//根据身份证号查询个人信息
+						char outJson[1024] = { 0 };
+						long cardtype = 1;	//实体卡
+						long rt = GetCusInfoByUnion(cardtype, sfzh, outMsg);
+						if (rt == 0)
 						{
-							//根据身份证号查询个人信息
-							char outJson[1024] = { 0 };
-							long cardtype = 1;	//实体卡
-							long rt = GetCusInfoByUnion(cardtype, sfzh, outMsg);
-							if (rt == 0)
-							{
-								return outMsg;
-							}
-							else
-							{
-								W_ReadCardLog("ERROR	GetPersionalInfo_temp	查询个人信息失败");
-
-								return NULL;
-							}
+							return outMsg;
 						}
 						else
 						{
-							W_ReadCardLog("ERROR	GetPersionalInfo_temp	身份证号码不合规");
+							W_ReadCardLog("ERROR	GetPersionalInfo_temp	查询个人信息失败");
 
 							return NULL;
 						}
 					}
 					else
 					{
-						W_ReadCardLog("ERROR	GetPersionalInfo_temp	握奇设备读居民健康卡失败");
+						W_ReadCardLog("ERROR	GetPersionalInfo_temp	身份证号码不合规");
 
 						return NULL;
 					}
 				}
+				else
+				{
+					W_ReadCardLog("ERROR	GetPersionalInfo_temp	握奇设备读居民健康卡失败");
+
+					return NULL;
+				}
 			}
 		}
+
 	}
 	if (type == 2)
 	{
@@ -5104,6 +5220,7 @@ LPSTR WINAPI GetPersionalInfo_temp(int type)
 			sendvalue["organizationCode"] = orgcode;
 			sendvalue["serialNumber"] = serialNo;
 			sendvalue["method"] = searchtype;
+			sendvalue["dataType"] = "010115";
 			string sendJson = sendvalue.toStyledString();
 			char _send_buff[2048] = { 0 };
 			strcpy(_send_buff, sendJson.c_str());
@@ -5223,3 +5340,432 @@ LPSTR WINAPI GetPersionalInfo_temp(int type)
 		}
 	}
 }
+LPSTR WINAPI GetPersionalInfo_temp_dc(int type)
+{
+	W_ReadCardLog("EVENT GetPersionalInfo_temp START");
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	if (type==1)
+	{
+		DCBEEP(10);
+
+		HMODULE HINS = LoadLibraryA("DCHealthyCarder.dll");
+		dc_open open = (dc_open)GetProcAddress(HINS, "OpenDevice");
+		HANDLE dev = open(100);
+		if ((long)dev>0)
+		{
+			W_ReadCardLog("德卡端口打开成功");
+		}
+		else
+		{
+			return NULL;
+		}
+
+		dc_poweron poweron = (dc_poweron)GetProcAddress(HINS, "PowerOn");
+		char data[100];
+		int ret = poweron(dev, 0, data);
+		if (ret==0)
+		{
+			W_ReadCardLog("德卡复位成功");
+		}
+		dc_ref05 ref05 = (dc_ref05)GetProcAddress(HINS, "iR_DDF1EF05Info");
+		char klb[100];
+		char gfbb[100];
+		char fkmc[100];
+		char fkdm[1000];
+		char fkzs[10240];
+		char fksj[100];
+		char kh[100] = { 0 };
+		char aqm[100];
+		char xlh[100];
+		char csdm[100];
+		ret = ref05(dev, klb, gfbb, fkmc, fkdm, fkzs, fksj, kh, aqm, xlh, csdm);
+		char log[100];
+		sprintf(log, "德卡读EF05状态：%d，卡号：%s", ret, kh);
+		W_ReadCardLog(log);
+		dc_close dclose = (dc_close)GetProcAddress(HINS, "CloseDevice");
+		dclose(dev);
+
+		if (ret==0)
+		{
+			W_ReadCardLog("德卡读居民健康卡成功");
+			if (strlen(kh) > 14)
+			{
+				//根据身份证号查询个人信息
+				char outJson[1024] = { 0 };
+				long cardtype = 1;	//实体卡
+				char* outMsg = new char[512];
+				long rt = GetCusInfoByUnion(cardtype, kh, outMsg);
+				return outMsg;
+			}
+		}
+		return NULL;
+	}
+	if (type == 2)
+	{
+		char qrcode[512] = { 0 };
+		int ret = DC_SCAN(qrcode);
+		string content_kh(qrcode);
+		if (strlen(qrcode) > 10)
+		{
+			////char* msgJson = new char[1024];
+			//char msgJson[512] = { 0 };
+			//GetCusInfoByUnion(2, qrcode, msgJson);
+			////delete[] msgJson;
+			//return msgJson;
+			string searchtype = "search";
+			char req_resv[2048];
+			LPSTR req_ip;
+			req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+			short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+			//定义并初始化Json对象
+			Json::Value sendvalue;
+			//string content(_info);
+			string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+			string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+			sendvalue["content"] = content_kh;
+			sendvalue["organizationCode"] = orgcode;
+			sendvalue["serialNumber"] = serialNo;
+			sendvalue["method"] = searchtype;
+			sendvalue["dataType"] = "010115";
+
+			string sendJson = sendvalue.toStyledString();
+			char _send_buff[2048] = { 0 };
+			strcpy(_send_buff, sendJson.c_str());
+			char logtmp[2048];
+			sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+			W_ReadCardLog(logtmp);
+			//发送请求
+			long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+			if (0 == ret_sendpost)
+			{
+				char _rev_temp[2048] = { 0 };
+				TransCharacter(req_resv, _rev_temp);
+				//截取json
+				string str_rev(_rev_temp);
+				string json_rel;
+				int json_bg = str_rev.find_first_of("{", 0);
+				int json_end = str_rev.find_last_of("}");
+				if (json_end > json_bg)
+				{
+					json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+					
+					//char msgJson[1024] = { 0 };
+					char* msgJson = new char[1024];
+					W_ReadCardLog(json_rel.c_str());
+					strcpy(msgJson, json_rel.c_str());
+					return msgJson;
+				}
+				else
+				{
+					W_ReadCardLog("ERROR	GetPersionalInfo_temp	二维码查询平台返回信息格式不正确");
+
+					return NULL;
+				}
+			}
+			else
+			{
+				W_ReadCardLog("ERROR	GetPersionalInfo_temp	二维码查询POST请求失败");
+
+				return NULL;
+			}
+		}
+		else
+		{
+			W_ReadCardLog("ERROR	GetPersionalInfo_temp	扫码失败或码值格式错误");
+			return NULL;
+		}
+	}
+}
+int __stdcall GetPersionalInfo_dc(int type,char* datatype, char* msgJson)
+{
+	W_ReadCardLog("EVENT GetPersionalInfo START");
+
+	//JudgeHDDType();
+	if (type == 1)
+	{
+		dc_open open = (dc_open)GetProcAddress(HIns_DC_HEL, "OpenDevice");
+		HANDLE dev = open(100);
+		
+		dc_poweron poweron = (dc_poweron)GetProcAddress(HIns_DC_HEL, "PowerOn");
+		char data[100];
+		int ret = poweron(dev, 0, data);
+		dc_ref05 ref05 = (dc_ref05)GetProcAddress(HIns_DC_HEL, "iR_DDF1EF05Info");
+		char klb[100];
+		char gfbb[100];
+		char fkmc[100];
+		char fkdm[1000];
+		char fkzs[10240];
+		char fksj[100];
+		char kh[100];
+		char aqm[100];
+		char xlh[100];
+		char csdm[100];
+		ret = ref05(dev, klb, gfbb, fkmc, fkdm, fkzs, fksj, kh, aqm, xlh, csdm);
+		dc_close dclose = (dc_close)GetProcAddress(HIns_DC_HEL, "CloseDevice");
+		dclose(dev);
+		// 蜂鸣
+		DCBEEP(10);
+
+		if (ret == 0)
+		{
+			if (strlen(kh) > 14)
+			{
+				//根据身份证号查询个人信息
+				char outJson[1024] = { 0 };
+				long cardtype = 1;	//实体卡
+				char* outMsg = new char[512];
+				long rt = GetCusInfoByUnion_DataType(cardtype, kh,datatype, outMsg);
+				
+				strcpy(msgJson, outMsg);
+				return rt;
+			}
+		}
+	}
+	if (type == 2)
+	{
+
+		char qrcode[512] = { 0 };
+		int ret = DC_SCAN(qrcode);
+		string content_kh(qrcode);
+		if (strlen(qrcode) > 10)
+		{
+			char* outMsg = new char[1024];
+			int status = GetCusInfoByUnion_DataType(2, qrcode,datatype, outMsg);
+			strcpy(msgJson, outMsg);
+			delete[] outMsg;
+			return status;
+			//string searchtype = "search";
+			//char req_resv[2048];
+			//LPSTR req_ip;
+			//req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+			//short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+			////定义并初始化Json对象
+			//Json::Value sendvalue;
+			////string content(_info);
+			//string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+			//string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+			//sendvalue["content"] = content_kh;
+			//sendvalue["organizationCode"] = orgcode;
+			//sendvalue["serialNumber"] = serialNo;
+			//sendvalue["method"] = searchtype;
+			//string sendJson = sendvalue.toStyledString();
+			//char _send_buff[2048] = { 0 };
+			//strcpy(_send_buff, sendJson.c_str());
+			//char logtmp[2048];
+			//sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+			//W_ReadCardLog(logtmp);
+			////发送请求
+			//long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+			//if (0 == ret_sendpost)
+			//{
+			//	char _rev_temp[2048] = { 0 };
+			//	TransCharacter(req_resv, _rev_temp);
+			//	//截取json
+			//	string str_rev(_rev_temp);
+			//	string json_rel;
+			//	int json_bg = str_rev.find_first_of("{", 0);
+			//	int json_end = str_rev.find_last_of("}");
+			//	if (json_end > json_bg)
+			//	{
+			//		json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+			//		W_ReadCardLog(json_rel.c_str());
+			//		strcpy(msgJson, json_rel.c_str());
+			//		return 0;
+			//	}
+			//	else
+			//	{
+			//		W_ReadCardLog("ERROR	GetPersionalInfo	平台返回参数格式不正确");
+
+			//		return -1;
+			//	}
+			//}
+			//else
+			//{
+			//	W_ReadCardLog("ERROR	GetPersionalInfo	信息查询接口连接失败");
+
+			//	return -2;
+			//}
+		}
+		else
+		{
+			W_ReadCardLog("ERROR	GetPersionalInfo	扫码失败或码值格式错误");
+			return -3;
+		}
+	}
+}
+int __stdcall GerernateEHCARD(char* json, char* outMsg)
+{
+	LPSTR postaddress = GetValueInIni("MIS", "POSTHCAR", iniFileName);
+
+}
+int WINAPI GetPersionalInfo(int type,char* datatype,char* outmsg)
+{
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	int htype = atoi(hddtype);
+	switch (htype)
+	{
+	case 1:return GetPersionalInfo_dc(type,datatype,outmsg);
+		break;
+	case 2:return GetPersionalInfo_wq(type,outmsg);
+		break;
+	default:
+		break;
+	}
+}
+LPSTR WINAPI GetPersionalInfo_temp(int type)
+{
+	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
+	int htype = atoi(hddtype);
+	switch (htype)
+	{
+	case 1:return GetPersionalInfo_temp_dc(type);
+		break;
+	case 2:return GetPersionalInfo_temp_wq(type);
+		break;
+	default:
+		break;
+	}
+}
+// 2020年2月13日13:48:03 增加根据电子健康卡二维码获取身份证号码接口
+int __stdcall GetICNFromQRCode(int type, char* qrcode, char* outICN)
+{
+	string content_kh(qrcode);
+	if (strlen(qrcode) > 10)
+	{
+		string searchtype = "search";
+		char req_resv[2048];
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		//定义并初始化Json对象
+		Json::Value sendvalue;
+		//string content(_info);
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["content"] = content_kh;
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = searchtype;
+		sendvalue["dataType"] = "010115";
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[2048] = { 0 };
+		strcpy(_send_buff, sendJson.c_str());
+		char logtmp[2048];
+		sprintf(logtmp, "发送请求的内容为： %s", _send_buff);
+		W_ReadCardLog(logtmp);
+		//发送请求
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
+		{
+			char _rev_temp[2048] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
+			{
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				W_ReadCardLog(json_rel.c_str());
+				//strcpy(outmsg, json_rel.c_str());
+				Json::Value JsonReturn;
+				Json::Reader jr;
+				jr.parse(json_rel.c_str(), JsonReturn);
+				string ICN = JsonReturn["content"]["data"]["papersNum"].asString();
+				strcpy(outICN, ICN.c_str());
+				return 0;
+			}
+			else
+			{
+				W_ReadCardLog("ERROR	GetPersionalInfo	平台返回参数格式不正确");
+
+				return -1;
+			}
+		}
+		else
+		{
+			W_ReadCardLog("ERROR	GetPersionalInfo	信息查询接口连接失败");
+
+			return -2;
+		}
+	}
+	else
+	{
+		return 404;
+	}
+}
+// 德卡扫码支付
+int __stdcall Trans_dc(char* oprator, long opfare, char* jydt,char* outjson)
+{
+	W_ReadCardLog("EVENT CapSetNBCardInfo_Str START");
+	// JudgeHDDType();
+	char outmsg[2048] = { 0 };
+	int ret = DC_SCAN(outmsg);
+	if (ret == 0)
+	{
+		Json::Value sendvalue;
+		string orgcode(GetValueInIni("MIS", "ORGCODE", iniFileName));
+		string serialNo(GetValueInIni("MIS", "SERIALNO", iniFileName));
+		sendvalue["organizationCode"] = orgcode;
+		sendvalue["serialNumber"] = serialNo;
+		sendvalue["method"] = "pay";
+		//使用17位时间戳作为订单号
+		std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch());
+		sendvalue["content"]["orderNo"] = ms.count();
+		sendvalue["content"]["orderTime"] = TransDate(jydt);
+		sendvalue["content"]["txnAmt"] = opfare;
+		sendvalue["content"]["termId"] = atoll(GetValueInIni("MIS", "TERMID", iniFileName));//终端号
+		sendvalue["content"]["reqType"] = "Clinic";
+		sendvalue["content"]["couponInfo"] = 0;
+		sendvalue["content"]["qrNo"] = outmsg;
+		sendvalue["content"]["merId"] = GetValueInIni("MIS", "MERID", iniFileName);
+		sendvalue["content"]["merCatCode"] = GetValueInIni("MIS", "MERCATCODE", iniFileName);
+		sendvalue["content"]["merName"] = GetValueInIni("MIS", "MERNAME", iniFileName);
+		string sendJson = sendvalue.toStyledString();
+		char _send_buff[1024] = { 0 };
+		memcpy(_send_buff, sendJson.c_str(), 1024);
+		W_ReadCardLog(_send_buff);
+		//提交接口
+		LPSTR req_ip;
+		req_ip = GetValueInIni("MIS", "BCNIP", iniFileName);
+		short _port = GetPrivateProfileIntA("MIS", "BCNPORT", 80, iniFileName);
+		char req_resv[1024] = { 0 };
+		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
+		if (0 == ret_sendpost)
+		{
+			char _rev_temp[1024] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
+			//截取json
+			string str_rev(_rev_temp);
+			string json_rel;
+			int json_bg = str_rev.find_first_of("{", 0);
+			int json_end = str_rev.find_last_of("}");
+			if (json_end > json_bg)
+			{
+				json_rel = str_rev.substr(json_bg, json_end - json_bg + 1);
+				W_ReadCardLog(json_rel.c_str());
+				strcpy(outjson, json_rel.c_str());
+				//返回Json示例：
+				//{"code":"R00000","content":{"data":{"orderNo":"1558334758179","payResult":"成功","autoCode":"0","termId":"1"}},"desc":"支付成功","flag":1}
+				return 0;
+
+			}
+			else
+			{
+				W_ReadCardLog("ERROR 返回信息格式有误");
+				return -12;
+			}
+		}
+		else
+		{
+			return ret_sendpost;
+		}
+	}
+	else
+	{
+		return -1;
+	}
+}
+#pragma endregion
