@@ -22,14 +22,7 @@
 //#include "aes.h";
 //#include "aes_encryptor.h";
 //使用Cryptoo++库
-#include "CryptoPP\include\aes.h";
-#include "CryptoPP\include\rijndael.h";
-#include "CryptoPP\include\randpool.h";
-#include "CryptoPP\include\rsa.h";
-#include "CryptoPP\include\hex.h";
-#include "CryptoPP\include\filters.h";
-#include "CryptoPP\include\modes.h";
-#pragma comment(lib, "cryptlib.lib")
+
 using namespace std;
 //定义黑名单状态,初始值为0，验证后黑名单为-1，非黑名单为1
 int is_black = 0;
@@ -715,26 +708,7 @@ void WriteInFile(char* filename, std::string str_to_write)
 	fout << str_to_write.c_str();
 	fout.close();
 }
-BYTE s_key[CryptoPP::AES::DEFAULT_KEYLENGTH], s_iv[CryptoPP::AES::BLOCKSIZE];
-//初始化key和IV
-void initKV()
-{
-	/*memset(s_key, 0x00, CryptoPP::AES::DEFAULT_KEYLENGTH);
-	memset(s_iv, 0x00, CryptoPP::AES::BLOCKSIZE);*/
-	char tempk[] = "xudutonghis20196";
-	char tempiv[] = "1234560405060708";
 
-	/*char tempk[] = "1234567890123456";
-	char tempiv[] = "0000000000000000";*/
-	for (int i = 0; i < CryptoPP::AES::DEFAULT_KEYLENGTH; i++)
-	{
-		s_key[i] = tempk[i];
-	}
-	for (int j = 0; j < CryptoPP::AES::BLOCKSIZE; j++)
-	{
-		s_iv[j] = tempiv[j];
-	}
-}
 //string encrypt(const string& plainText)
 //{
 //	string cipherText;
@@ -1711,9 +1685,9 @@ long GetCusInfoByUnion_DataType(long type, char* inputMsg,char* datatype, char* 
 	if (0 == ret_sendpost)
 	{
 		char _rev_temp[2048] = { 0 };
-		TransCharacter(req_resv, _rev_temp);
+		//TransCharacter(req_resv, _rev_temp);
 		//截取json
-		string str_rev(_rev_temp);
+		string str_rev(req_resv);
 		string json_rel;
 		int json_bg = str_rev.find_first_of("{", 0);
 		int json_end = str_rev.find_last_of("}");
@@ -5476,7 +5450,7 @@ LPSTR WINAPI GetPersionalInfo_temp_dc(int type)
 		}
 	}
 }
-int __stdcall GetPersionalInfo_dc(int type,char* datatype, char* msgJson)
+int __stdcall GetPersionalInfo_dc(int type,char* datatype,char* qrcode, char* msgJson)
 {
 	W_ReadCardLog("EVENT GetPersionalInfo START");
 
@@ -5524,8 +5498,8 @@ int __stdcall GetPersionalInfo_dc(int type,char* datatype, char* msgJson)
 	if (type == 2)
 	{
 
-		char qrcode[512] = { 0 };
-		int ret = DC_SCAN(qrcode);
+		/*char qrcode[512] = { 0 };
+		int ret = DC_SCAN(qrcode);*/
 		string content_kh(qrcode);
 		if (strlen(qrcode) > 10)
 		{
@@ -5598,13 +5572,13 @@ int __stdcall GerernateEHCARD(char* json, char* outMsg)
 	LPSTR postaddress = GetValueInIni("MIS", "POSTHCAR", iniFileName);
 
 }
-int WINAPI GetPersionalInfo(int type,char* datatype,char* outmsg)
+int WINAPI GetPersionalInfo(int type,char* datatype,char* qrcode,char* outmsg)
 {
 	char* hddtype = GetValueInIni("MIS", "HDDTYPE", iniFileName);
 	int htype = atoi(hddtype);
 	switch (htype)
 	{
-	case 1:return GetPersionalInfo_dc(type,datatype,outmsg);
+	case 1:return GetPersionalInfo_dc(type,datatype,qrcode,outmsg);
 		break;
 	case 2:return GetPersionalInfo_wq(type,outmsg);
 		break;
@@ -5735,9 +5709,9 @@ int __stdcall Trans_dc(char* oprator, long opfare, char* jydt,char* outjson)
 		long ret_sendpost = SendPostRequest(req_ip, _port, _send_buff, req_resv);
 		if (0 == ret_sendpost)
 		{
-			char _rev_temp[1024] = { 0 };
-			TransCharacter(req_resv, _rev_temp);
 			//截取json
+			char _rev_temp[2048] = { 0 };
+			TransCharacter(req_resv, _rev_temp);
 			string str_rev(_rev_temp);
 			string json_rel;
 			int json_bg = str_rev.find_first_of("{", 0);
@@ -5750,7 +5724,6 @@ int __stdcall Trans_dc(char* oprator, long opfare, char* jydt,char* outjson)
 				//返回Json示例：
 				//{"code":"R00000","content":{"data":{"orderNo":"1558334758179","payResult":"成功","autoCode":"0","termId":"1"}},"desc":"支付成功","flag":1}
 				return 0;
-
 			}
 			else
 			{
